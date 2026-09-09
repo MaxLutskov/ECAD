@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/ECAD.Core/ECAD.Core.csproj" />
+  <Project Path="src/ECAD.Desktop/ECAD.Desktop.csproj" />
+  <Project Path="tests/ECAD.Checks/ECAD.Checks.csproj" />
+</Solution>
