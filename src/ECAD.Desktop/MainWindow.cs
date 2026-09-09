@@ -31,7 +31,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.7.2  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
+        var title = new TextBlock { Text = "ECAD 0.8  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
         header.Children.Add(title);
         var files = new WrapPanel { Margin = new Thickness(8, 0) };
         header.Children.Add(files);
@@ -53,8 +53,8 @@ public sealed class MainWindow : Window
         header.Children.Add(tools);
         AddButton(tools, "Вибір / переміщення", () => SetTool(null, "Потягни рамку з порожнього місця. Shift додає до вибору."));
         AddButton(tools, "Лінія", () => SetTool(ElementKind.Line, "Лінія: початок → кінцева точка (клік), або початок → довжина → Tab → кут → Enter."));
-        AddButton(tools, "Прямокутник", () => SetTool(ElementKind.Rectangle, "Прямокутник: клацни два протилежні кути."));
-        AddButton(tools, "Коло", () => SetTool(ElementKind.Circle, "Коло: клацни центр і точку на колі."));
+        AddButton(tools, "Прямокутник", () => SetTool(ElementKind.Rectangle, "Прямокутник: два кути або початок → ширина → Tab → висота → Enter."));
+        AddButton(tools, "Коло", () => SetTool(ElementKind.Circle, "Коло: центр і точка або центр → радіус; Tab перемикає на діаметр."));
         AddButton(tools, "Розмір", () => SetTool(ElementKind.Dimension, "Розмір: обери дві точки / паралельні лінії, потім клацни місце напису."));
         AddButton(tools, "Вузол", () => SetTool(ElementKind.Junction, "Вузол: клацни кінець, сегмент або перетин ліній. Звичайний перетин без точки не є з’єднанням."));
         AddButton(tools, "Текст", () => SetTool(ElementKind.Text, "Текст: клацни місце розташування. Подвійний клік редагує наявний напис."));
@@ -76,7 +76,7 @@ public sealed class MainWindow : Window
         var step = new NumericUpDown { Minimum = .1m, Maximum = 100, Increment = .5m, Value = 2.5m, Width = 140 };
         step.ValueChanged += (_, _) => { canvas.GridStep = (double)(step.Value ?? 2.5m); canvas.InvalidateVisual(); };
         settings.Children.Add(step);
-        AddButton(settings, "Змінити довжину / кут", canvas.EditSelectedLine);
+        AddButton(settings, "Змінити параметри", canvas.EditSelectedGeometry);
         var footer = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         footer.Children.Add(status);

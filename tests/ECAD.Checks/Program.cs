@@ -412,6 +412,53 @@ Check("Floating input rejects zero and Escape cancels without adding a command",
     Assert(!liveCanvas.LineInput.IsVisible); Assert(interactive.Document.Elements.Length == 1);
     Assert(liveCanvas.Tool is null);
 });
+Check("Rectangle supports exact width and height through the shared input", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Rectangle); Tap(60, 60); liveWindow.MouseMove(new(240, 180));
+    liveWindow.KeyTextInput("12,3");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("7.4");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var rectangle = interactive.Document.Elements.Single();
+    Assert(rectangle.Kind == ElementKind.Rectangle && rectangle.A == new PointMm(10, 10));
+    Near(Math.Abs(rectangle.B.X - rectangle.A.X), 12.3); Near(Math.Abs(rectangle.B.Y - rectangle.A.Y), 7.4);
+});
+Check("Circle supports exact radius or diameter through the shared input", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Circle); Tap(60, 60); liveWindow.MouseMove(new(240, 60));
+    liveWindow.KeyTextInput("8.75");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    Near(interactive.Document.Elements.Single().LengthMm, 8.75);
+
+    Tap(180, 180); liveWindow.MouseMove(new(300, 180)); liveWindow.KeyTextInput("1");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("22.5");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    Near(interactive.Document.Elements.Last().LengthMm, 11.25);
+});
+Check("Rectangle parameter editing keeps its anchor and is undoable", () =>
+{
+    var rectangle = new DrawingElement(Guid.NewGuid(), ElementKind.Rectangle, new(20, 30), new(35, 40));
+    interactive.Load(new() { Elements = [rectangle] }); interactive.Select(rectangle, false);
+    liveCanvas.EditSelectedGeometry();
+    liveCanvas.LineInput.LengthBox.Text = "24.6"; liveCanvas.LineInput.AngleBox.Text = "13.2";
+    liveCanvas.LineInput.AngleBox.Focus();
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var edited = interactive.Document.Elements.Single();
+    Assert(edited.A == rectangle.A); Near(edited.B.X - edited.A.X, 24.6); Near(edited.B.Y - edited.A.Y, 13.2);
+    interactive.Undo(); Assert(interactive.Document.Elements.Single() == rectangle);
+});
+Check("Circle diameter editing keeps its centre and is undoable", () =>
+{
+    var circle = new DrawingElement(Guid.NewGuid(), ElementKind.Circle, new(40, 50), new(46, 50));
+    interactive.Load(new() { Elements = [circle] }); interactive.Select(circle, false);
+    liveCanvas.EditSelectedGeometry();
+    liveCanvas.LineInput.FocusField(true); liveCanvas.LineInput.AngleBox.Text = "31.4";
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var edited = interactive.Document.Elements.Single();
+    Assert(edited.A == circle.A); Near(edited.LengthMm, 15.7);
+    interactive.Undo(); Assert(interactive.Document.Elements.Single() == circle);
+});
 Check("Escape returns every tool to selection and preserves selection", () =>
 {
     interactive.Load(new() { Elements = [Line()] });

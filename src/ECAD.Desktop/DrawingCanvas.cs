@@ -25,7 +25,7 @@ public sealed class DrawingCanvas : Decorator
     private GeometryPick? firstPick;
     private GeometryPick? hoverPick;
     private DrawingElement? pendingDimension;
-    private Guid? editingLineId;
+    private Guid? editingElementId;
     private readonly List<PointMm> wirePoints = [];
     private bool wireHorizontalFirst = true;
     private Point inputPosition;
@@ -46,8 +46,8 @@ public sealed class DrawingCanvas : Decorator
         Focusable = true; ClipToBounds = true;
         session.Changed += InvalidateVisual;
         Child = LineInput;
-        LineInput.Edited += () => { UpdateLineInput(); InvalidateVisual(); };
-        LineInput.Confirm += CommitLine;
+        LineInput.Edited += () => { UpdateGeometryInput(); InvalidateVisual(); };
+        LineInput.Confirm += CommitGeometry;
         LineInput.Cancelled += EscapeToSelection;
     }
 
@@ -68,7 +68,7 @@ public sealed class DrawingCanvas : Decorator
     {
         var hadFocus = LineInput.IsKeyboardFocusWithin;
         anchor = null; dragStart = null; dragDelta = default; panStart = null;
-        boxStart = null; firstPick = null; hoverPick = null; pendingDimension = null; editingLineId = null;
+        boxStart = null; firstPick = null; hoverPick = null; pendingDimension = null; editingElementId = null;
         wirePoints.Clear();
         LineInput.IsVisible = false;
         if (hadFocus) Focus();
@@ -83,19 +83,45 @@ public sealed class DrawingCanvas : Decorator
 
     private PointMm EndPoint(PointMm start, PointMm end)
     {
-        if (Tool != ElementKind.Line) return end;
-        var length = LineInput.Length ?? (ExactLength > 0 ? ExactLength : (end - start).Length);
-        if (length <= 1e-9) return start;
-        return Geometry.Polar(start, length, LineInput.Angle ?? Geometry.Angle(end - start));
+        var delta = end - start;
+        return Tool switch
+        {
+            ElementKind.Line => LineEndPoint(start, end),
+            ElementKind.Rectangle => new(start.X + Direction(delta.X) * (LineInput.FirstValue ?? Math.Abs(delta.X)),
+                start.Y + Direction(delta.Y) * (LineInput.SecondValue ?? Math.Abs(delta.Y))),
+            ElementKind.Circle => CircleEndPoint(start, end),
+            _ => end
+        };
     }
+
+    private PointMm LineEndPoint(PointMm start, PointMm end)
+    {
+        var length = LineInput.FirstValue ?? (ExactLength > 0 ? ExactLength : (end - start).Length);
+        if (length <= 1e-9) return start;
+        return Geometry.Polar(start, length, LineInput.SecondValue ?? Geometry.Angle(end - start));
+    }
+
+    private PointMm CircleEndPoint(PointMm start, PointMm end)
+    {
+        var delta = end - start;
+        var radius = LineInput.FirstValue ?? (LineInput.SecondValue is { } diameter ? diameter / 2 : delta.Length);
+        if (radius <= 1e-9) return start;
+        return Geometry.Polar(start, radius, delta.Length > 1e-9 ? Geometry.Angle(delta) : 0);
+    }
+
+    private static double Direction(double value) => value < 0 ? -1 : 1;
+    private bool HasGeometryInput => Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle;
 
     private bool FromInput(object? source) => source is Visual v && (v == LineInput || v.GetVisualAncestors().Contains(LineInput));
 
-    private void UpdateLineInput()
+    private void UpdateGeometryInput()
     {
-        if (anchor is not { } a || Tool != ElementKind.Line) return;
+        if (anchor is not { } a || !HasGeometryInput) return;
         var end = EndPoint(a, cursor);
-        LineInput.UpdateLive((end - a).Length, Geometry.Angle(end - a));
+        var delta = end - a;
+        if (Tool == ElementKind.Rectangle) LineInput.UpdateLive(Math.Abs(delta.X), Math.Abs(delta.Y));
+        else if (Tool == ElementKind.Circle) LineInput.UpdateLive(delta.Length, delta.Length * 2);
+        else LineInput.UpdateLive(delta.Length, Geometry.Angle(delta));
         if (!LineInput.IsKeyboardFocusWithin)
         {
             var p = Screen(end);
@@ -109,15 +135,21 @@ public sealed class DrawingCanvas : Decorator
         }
     }
 
-    public void EditSelectedLine()
+    public void EditSelectedGeometry()
     {
         var selected = session.Document.Elements.Where(e => session.Selection.Contains(e.Id)).ToArray();
-        if (selected.Length != 1 || selected[0].Kind != ElementKind.Line)
-        { Status?.Invoke("Виділи одну лінію для зміни довжини та кута."); return; }
-        var line = selected[0]; SetTool(ElementKind.Line); editingLineId = line.Id;
-        anchor = line.A; cursor = line.B; ExactLength = 0;
-        LineInput.Begin(line.LengthMm, Geometry.Angle(line.B - line.A)); UpdateLineInput(); LineInput.FocusField(false);
+        if (selected.Length != 1 || selected[0].Kind is not (ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle))
+        { Status?.Invoke("Виділи одну лінію, прямокутник або коло для зміни параметрів."); return; }
+        var element = selected[0]; SetTool(element.Kind); editingElementId = element.Id;
+        anchor = element.A; cursor = element.B; ExactLength = 0;
+        var delta = element.B - element.A;
+        if (element.Kind == ElementKind.Line) LineInput.Begin(element.Kind, element.LengthMm, Geometry.Angle(delta));
+        else if (element.Kind == ElementKind.Rectangle) LineInput.Begin(element.Kind, Math.Abs(delta.X), Math.Abs(delta.Y));
+        else LineInput.Begin(element.Kind, element.LengthMm, null);
+        UpdateGeometryInput(); LineInput.FocusField(false);
     }
+
+    public void EditSelectedLine() => EditSelectedGeometry();
 
     public void CopySelection()
     {
@@ -161,17 +193,18 @@ public sealed class DrawingCanvas : Decorator
         Focus(); InvalidateVisual();
     }
 
-    private void CommitLine()
+    private void CommitGeometry()
     {
-        if (anchor is not { } a || !LineInput.Valid) return;
+        if (anchor is not { } a || !HasGeometryInput || !LineInput.Valid) return;
         var b = EndPoint(a, cursor);
-        if ((b - a).Length < 1e-9) return;
+        if ((b - a).Length < 1e-9 || Tool == ElementKind.Rectangle && (a.X == b.X || a.Y == b.Y)) return;
         try
         {
-            if (editingLineId is { } id)
+            var kind = Tool!.Value;
+            if (editingElementId is { } id)
                 session.Apply(session.Document.Elements.Select(e => e.Id == id ? e with { A = a, B = b } : e).ToArray());
-            else session.Add(new(Guid.NewGuid(), ElementKind.Line, a, b));
-            var editing = editingLineId.HasValue;
+            else session.Add(new(Guid.NewGuid(), kind, a, b));
+            var editing = editingElementId.HasValue;
             Cancel(); if (editing) Tool = null; Focus();
         }
         catch (InvalidDataException ex) { Status?.Invoke(ex.Message); }
@@ -315,7 +348,7 @@ public sealed class DrawingCanvas : Decorator
         var displayed = dragStart is not null ? session.PreviewMove(dragDelta) : doc.Elements;
         foreach (var element in displayed)
         {
-            if (element.Id == editingLineId) continue;
+            if (element.Id == editingElementId) continue;
             var selected = session.Selection.Contains(element.Id);
             Draw(context, element, selected ? Brushes.RoyalBlue : Brushes.Black);
         }
@@ -325,10 +358,10 @@ public sealed class DrawingCanvas : Decorator
         if (Tool == ElementKind.Wire && previewWire.Length >= 2)
             for (var i = 1; i < previewWire.Length; i++)
                 context.DrawLine(new Pen(Brushes.Teal, Math.Max(1, .25 * scale)), Screen(previewWire[i - 1]), Screen(previewWire[i]));
-        if (anchor is { } lineStart && Tool == ElementKind.Line && !LineInput.IsVisible)
+        if (anchor is { } geometryStart && Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle && !LineInput.IsVisible)
         {
-            var end = EndPoint(lineStart, cursor);
-            DrawLiveLineValues(context, Screen(end), (end - lineStart).Length, Geometry.Angle(end - lineStart));
+            var end = EndPoint(geometryStart, cursor);
+            DrawLiveGeometryValues(context, Screen(end), Tool.Value, end - geometryStart);
         }
         if (pendingDimension is { } dim) Draw(context, dim, Brushes.Teal);
         foreach (var pick in new[] { firstPick, hoverPick }.OfType<GeometryPick>())
@@ -354,9 +387,16 @@ public sealed class DrawingCanvas : Decorator
         }
     }
 
-    private static void DrawLiveLineValues(DrawingContext context, Point at, double length, double angle)
+    private static void DrawLiveGeometryValues(DrawingContext context, Point at, ElementKind kind, PointMm delta)
     {
-        var text = new FormattedText($"L {length:0.###} мм    ∠ {angle:0.###}°", CultureInfo.CurrentCulture,
+        var value = kind switch
+        {
+            ElementKind.Line => $"L {delta.Length:0.###} мм    ∠ {Geometry.Angle(delta):0.###}°",
+            ElementKind.Rectangle => $"Ш {Math.Abs(delta.X):0.###} мм    В {Math.Abs(delta.Y):0.###} мм",
+            ElementKind.Circle => $"R {delta.Length:0.###} мм    ⌀ {delta.Length * 2:0.###} мм",
+            _ => ""
+        };
+        var text = new FormattedText(value, CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight, Typeface.Default, 13, Brushes.DarkSlateGray);
         var x = at.X + 16; var y = at.Y + 16;
         context.DrawRectangle(Brushes.White, new Pen(Brushes.Teal, 1),
@@ -474,7 +514,7 @@ public sealed class DrawingCanvas : Decorator
         }
         if (point.Properties.IsRightButtonPressed) { Cancel(); return; }
         if (!point.Properties.IsLeftButtonPressed) return;
-        var raw = World(point.Position); cursor = Tool is ElementKind.Line or ElementKind.Dimension or ElementKind.Wire ? Pick(raw).Point : Snap(raw);
+        var raw = World(point.Position); cursor = Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Dimension or ElementKind.Wire ? Pick(raw).Point : Snap(raw);
         if (Tool == ElementKind.Wire)
         {
             var pick = Pick(raw); AddWirePoint(pick, e.ClickCount >= 2);
@@ -497,17 +537,12 @@ public sealed class DrawingCanvas : Decorator
             if (anchor is not { } a)
             {
                 anchor = cursor;
-                if (kind == ElementKind.Line)
-                {
-                    LineInput.Begin(ExactLength > 0 ? ExactLength : null); UpdateLineInput();
-                }
+                LineInput.Begin(kind, kind == ElementKind.Line && ExactLength > 0 ? ExactLength : null);
+                UpdateGeometryInput();
             }
             else
             {
-                if (kind == ElementKind.Line) { CommitLine(); e.Handled = true; return; }
-                var b = EndPoint(a, cursor);
-                if ((b - a).Length < 1e-9 || kind == ElementKind.Rectangle && (a.X == b.X || a.Y == b.Y)) return;
-                session.Add(new(Guid.NewGuid(), kind, a, b)); anchor = null;
+                CommitGeometry(); e.Handled = true; return;
             }
         }
         else
@@ -522,8 +557,8 @@ public sealed class DrawingCanvas : Decorator
             // Preserve a multi-selection when dragging an already selected item.
             if (hit is null || additive || !session.Selection.Contains(hit.Id)) session.Select(hit, additive);
             if (hit is not null) { dragStart = cursor; dragDelta = default; e.Pointer.Capture(this); }
-            if (e.ClickCount == 2 && hit?.Kind == ElementKind.Line)
-            { dragStart = null; EditSelectedLine(); }
+            if (e.ClickCount == 2 && hit?.Kind is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle)
+            { dragStart = null; EditSelectedGeometry(); }
             else if (e.ClickCount == 2 && hit?.Kind == ElementKind.Text)
             {
                 dragStart = null;
@@ -543,7 +578,7 @@ public sealed class DrawingCanvas : Decorator
                     Status?.Invoke($"Коло {net.Number}: провідників {net.WireIds.Length}, підключених контактів {net.Pins.Length}.");
             }
         }
-        UpdateLineInput();
+        UpdateGeometryInput();
         InvalidateVisual(); e.Handled = true;
     }
 
@@ -554,15 +589,27 @@ public sealed class DrawingCanvas : Decorator
         var p = e.GetPosition(this);
         if (panStart is { } previous) { origin += p - previous; panStart = p; }
         var raw = World(p);
-        hoverPick = Tool is ElementKind.Dimension or ElementKind.Line or ElementKind.Wire ? Pick(raw) :
+        hoverPick = Tool is ElementKind.Dimension or ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire ? Pick(raw) :
             Tool == ElementKind.Junction ? new(ConnectionSnap.Pick(session.Document.Elements, raw, 8 / scale, Snap(raw)), null) : null;
         cursor = hoverPick?.Point ?? Snap(raw);
         if (boxStart is not null) boxEnd = raw;
         if (dragStart is { } start) dragDelta = cursor - start;
-        PlaceDimension(); UpdateLineInput();
-        var length = anchor is { } a ? (EndPoint(a, cursor) - a).Length : 0;
-        Status?.Invoke($"X {cursor.X:0.###} мм   Y {cursor.Y:0.###} мм" + (anchor is not null ? $"   Довжина {length:0.###} мм" : ""));
+        PlaceDimension(); UpdateGeometryInput();
+        var details = anchor is { } a ? GeometryStatus(a, EndPoint(a, cursor)) : "";
+        Status?.Invoke($"X {cursor.X:0.###} мм   Y {cursor.Y:0.###} мм{details}");
         InvalidateVisual();
+    }
+
+    private string GeometryStatus(PointMm start, PointMm end)
+    {
+        var delta = end - start;
+        return Tool switch
+        {
+            ElementKind.Line => $"   Довжина {delta.Length:0.###} мм   Кут {Geometry.Angle(delta):0.###}°",
+            ElementKind.Rectangle => $"   Ширина {Math.Abs(delta.X):0.###} мм   Висота {Math.Abs(delta.Y):0.###} мм",
+            ElementKind.Circle => $"   Радіус {delta.Length:0.###} мм   Діаметр {delta.Length * 2:0.###} мм",
+            _ => $"   Довжина {delta.Length:0.###} мм"
+        };
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -597,13 +644,13 @@ public sealed class DrawingCanvas : Decorator
         var p = e.GetPosition(this); var fixedPoint = World(p);
         scale = Math.Clamp(scale * Math.Pow(1.15, e.Delta.Y), .2, 30);
         origin = new(p.X - fixedPoint.X * scale, p.Y - fixedPoint.Y * scale);
-        cursor = Snap(World(p)); UpdateLineInput(); PlaceDimension(); InvalidateVisual(); e.Handled = true;
+        cursor = Snap(World(p)); UpdateGeometryInput(); PlaceDimension(); InvalidateVisual(); e.Handled = true;
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (Tool == ElementKind.Line && anchor is not null && !LineInput.IsKeyboardFocusWithin &&
+        if (HasGeometryInput && anchor is not null && !LineInput.IsKeyboardFocusWithin &&
             !string.IsNullOrEmpty(e.Text) && e.Text.All(c => char.IsDigit(c) || c is '.' or ',' or '-' or '+'))
         { LineInput.StartTyping(e.Text); e.Handled = true; }
     }
@@ -612,11 +659,11 @@ public sealed class DrawingCanvas : Decorator
     {
         base.OnKeyDown(e);
         if (FromInput(e.Source)) return;
-        if (e.Key == Key.Tab && anchor is not null && Tool == ElementKind.Line)
+        if (e.Key == Key.Tab && anchor is not null && HasGeometryInput)
         { LineInput.FocusField(false); e.Handled = true; return; }
         if (e.Key == Key.Enter)
         {
-            if (Tool == ElementKind.Line) CommitLine();
+            if (HasGeometryInput) CommitGeometry();
             else if (Tool == ElementKind.Wire) CommitWire();
             else if (Tool == ElementKind.Dimension)
             {
