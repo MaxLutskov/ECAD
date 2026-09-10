@@ -19,7 +19,7 @@ public sealed class EditorSession
     {
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
         document.Validate();
-        Document = document with { SchemaVersion = 6, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        Document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
         undo.Clear(); redo.Clear(); Selection.Clear(); Changed?.Invoke();
     }
 
@@ -30,7 +30,7 @@ public sealed class EditorSession
         next.Validate();
         undo.Add(Document);
         if (undo.Count > 200) undo.RemoveAt(0);
-        Document = next with { SchemaVersion = 6, Elements = AssociativeDimensions.ResolveAll(elements) }; redo.Clear(); Notify();
+        Document = next with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(elements) }; redo.Clear(); Notify();
     }
 
     public void ApplyDocument(DrawingDocument document)
@@ -38,7 +38,7 @@ public sealed class EditorSession
         document.Validate();
         if (ReferenceEquals(Document, document)) return;
         undo.Add(Document); if (undo.Count > 200) undo.RemoveAt(0);
-        Document = document with { SchemaVersion = 6, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        Document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
         redo.Clear(); Notify();
     }
 

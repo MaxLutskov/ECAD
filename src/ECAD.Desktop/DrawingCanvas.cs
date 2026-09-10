@@ -31,6 +31,7 @@ public sealed class DrawingCanvas : Decorator
     private Point inputPosition;
     public LineInputPanel LineInput { get; } = new();
     public ElementKind? Tool { get; private set; }
+    public ElementKind ActivePathKind { get; private set; } = ElementKind.Wire;
     public bool IsDrawing => anchor is not null;
     public double GridStep { get; set; } = 2.5;
     public double ExactLength { get; set; }
@@ -59,7 +60,25 @@ public sealed class DrawingCanvas : Decorator
     { LineInput.Arrange(new Rect(inputPosition, LineInput.DesiredSize)); return finalSize; }
     private PointMm World(Point p) => new((p.X - origin.X) / scale, (p.Y - origin.Y) / scale);
     private PointMm Snap(PointMm p) => SnapEnabled ? Geometry.Snap(p, GridStep) : p;
-    public void SetTool(ElementKind? tool) { Cancel(); Tool = tool; Focus(); InvalidateVisual(); }
+    public void SetTool(ElementKind? tool)
+    {
+        Cancel();
+        Tool = tool;
+        if (tool is ElementKind.Line or ElementKind.Wire) ActivePathKind = tool.Value;
+        Focus(); InvalidateVisual();
+    }
+    public void ActivatePathTool() => SetTool(ActivePathKind);
+    public void SetPathKind(ElementKind kind)
+    {
+        if (kind is not (ElementKind.Line or ElementKind.Wire)) throw new ArgumentOutOfRangeException(nameof(kind));
+        var wasActive = Tool is ElementKind.Line or ElementKind.Wire;
+        Cancel(); ActivePathKind = kind;
+        if (wasActive) Tool = kind;
+        Focus(); InvalidateVisual();
+        Status?.Invoke(kind == ElementKind.Wire
+            ? "Тип лінії: провідник. Сегменти беруть участь в електричних з’єднаннях."
+            : "Тип лінії: графіка. Лінії не утворюють електричних з’єднань.");
+    }
     public void EscapeToSelection()
     {
         Cancel(); Tool = null; Focus();
@@ -403,14 +422,15 @@ public sealed class DrawingCanvas : Decorator
         {
             if (element.Id == editingElementId) continue;
             var selected = session.Selection.Contains(element.Id);
-            Draw(context, element, selected ? Brushes.RoyalBlue : Brushes.Black);
+            var brush = selected ? Brushes.RoyalBlue : ElementBrush(element.Kind);
+            Draw(context, element, brush);
         }
         if (anchor is { } a && Tool is { } kind && kind is not (ElementKind.Wire or ElementKind.Symbol))
             Draw(context, new(Guid.Empty, kind, a, EndPoint(a, cursor)), Brushes.Teal);
         var previewWire = PreviewWire();
         if (Tool == ElementKind.Wire && previewWire.Length >= 2)
             for (var i = 1; i < previewWire.Length; i++)
-                context.DrawLine(new Pen(Brushes.Teal, Math.Max(1, .25 * scale)), Screen(previewWire[i - 1]), Screen(previewWire[i]));
+                context.DrawLine(new Pen(Brushes.SeaGreen, Math.Max(1.5, .42 * scale)), Screen(previewWire[i - 1]), Screen(previewWire[i]));
         if (Tool == ElementKind.Wire && wirePoints.Count > 0 && !LineInput.IsVisible)
         {
             var end = LineInput.HasInput ? WireInputEnd(wirePoints[^1], cursor) : previewWire[^1];
@@ -466,7 +486,7 @@ public sealed class DrawingCanvas : Decorator
     private void Draw(DrawingContext ctx, DrawingElement e, IBrush brush)
     {
         var a = Screen(e.A); var b = Screen(e.B);
-        var pen = new Pen(brush, Math.Max(1, .25 * scale));
+        var pen = new Pen(brush, e.Kind == ElementKind.Wire ? Math.Max(1.5, .42 * scale) : Math.Max(1, .25 * scale));
         switch (e.Kind)
         {
             case ElementKind.Line: ctx.DrawLine(pen, a, b); break;
@@ -507,6 +527,13 @@ public sealed class DrawingCanvas : Decorator
             foreach (var p in AssociativeDimensions.Vertices(e).DefaultIfEmpty(e.A).Distinct().Select(Screen))
                 ctx.DrawRectangle(Brushes.White, new Pen(brush, 1), new Rect(p.X - 3, p.Y - 3, 6, 6));
     }
+
+    private static IBrush ElementBrush(ElementKind kind) => kind switch
+    {
+        ElementKind.Wire or ElementKind.Junction => new SolidColorBrush(Color.Parse("#176b3a")),
+        ElementKind.Line => new SolidColorBrush(Color.Parse("#4b5563")),
+        _ => Brushes.Black
+    };
 
     private void DrawSymbol(DrawingContext ctx, DrawingElement e, Pen pen, IBrush brush)
     {

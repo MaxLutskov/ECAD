@@ -9,7 +9,7 @@ public static class ProjectFile
     public static void Save(string path, DrawingDocument document)
     {
         document.Validate();
-        document = document with { SchemaVersion = 6, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
         path = Path.GetFullPath(path);
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -38,7 +38,7 @@ public static class ProjectFile
             ?? throw new InvalidDataException("Порожній документ.");
         document.Validate();
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
-        document = document with { SchemaVersion = 6 };
+        document = document with { SchemaVersion = 7 };
         document.Validate();
         return document with { Elements = AssociativeDimensions.ResolveAll(document.Elements) };
     }

@@ -9,6 +9,7 @@ public enum ElementKind { Line, Rectangle, Circle, Dimension, Junction, Text, Wi
 // Dimensions store stable references; A/B are resolved measurement positions.
 public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointMm B, Guid? GroupId = null)
 {
+    public string? Name { get; init; }
     public GeometryReference? StartReference { get; init; }
     public GeometryReference? EndReference { get; init; }
     public double DimensionOffset { get; init; } = 7;
@@ -71,7 +72,7 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 6;
+    public int SchemaVersion { get; init; } = 7;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
@@ -79,7 +80,7 @@ public sealed record DrawingDocument
 
     public void Validate()
     {
-        if (SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6)) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or 7)) throw new InvalidDataException("Непідтримувана версія документа.");
         if (!double.IsFinite(WidthMm) || !double.IsFinite(HeightMm) || WidthMm <= 0 || HeightMm <= 0 ||
             WidthMm > 10000 || HeightMm > 10000)
             throw new InvalidDataException("Некоректний розмір аркуша.");
@@ -92,6 +93,7 @@ public sealed record DrawingDocument
         foreach (var e in Elements)
             if (e is null || e.Id == Guid.Empty || !ids.Add(e.Id) || !Enum.IsDefined(e.Kind) ||
                 !e.A.IsFinite || !e.B.IsFinite ||
+                (e.Name is not null && (string.IsNullOrWhiteSpace(e.Name) || e.Name.Length > 200)) ||
                 (e.LengthMm < 1e-9 && e.Kind is not (ElementKind.Dimension or ElementKind.Junction or ElementKind.Text or ElementKind.Symbol)) ||
                 !double.IsFinite(e.LengthMm) || !double.IsFinite(e.DimensionOffset) ||
                 !double.IsFinite(e.TextHeightMm) || e.TextHeightMm is < .5 or > 100 ||

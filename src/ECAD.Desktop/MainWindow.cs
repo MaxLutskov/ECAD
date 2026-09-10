@@ -31,7 +31,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.8.2  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
+        var title = new TextBlock { Text = "ECAD 0.9.0  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
         header.Children.Add(title);
         var files = new WrapPanel { Margin = new Thickness(8, 0) };
         header.Children.Add(files);
@@ -52,13 +52,18 @@ public sealed class MainWindow : Window
         var tools = new WrapPanel { Margin = new Thickness(8, 4) };
         header.Children.Add(tools);
         AddButton(tools, "Вибір / переміщення", () => SetTool(null, "Потягни рамку з порожнього місця. Shift додає до вибору."));
-        AddButton(tools, "Лінія", () => SetTool(ElementKind.Line, "Лінія: початок → кінцева точка (клік), або початок → довжина → Tab → кут → Enter."));
+        AddButton(tools, "Лінія / провідник", () =>
+        {
+            canvas.ActivatePathTool();
+            status.Text = canvas.ActivePathKind == ElementKind.Wire
+                ? "Провідник: кліки задають трасу; число → довжина → Tab → кут → Enter."
+                : "Графічна лінія: дві точки або початок → довжина → Tab → кут → Enter.";
+        });
         AddButton(tools, "Прямокутник", () => SetTool(ElementKind.Rectangle, "Прямокутник: два кути або початок → ширина → Tab → висота → Enter."));
         AddButton(tools, "Коло", () => SetTool(ElementKind.Circle, "Коло: центр і точка або центр → радіус; Tab перемикає на діаметр."));
         AddButton(tools, "Розмір", () => SetTool(ElementKind.Dimension, "Розмір: обери дві точки / паралельні лінії, потім клацни місце напису."));
         AddButton(tools, "Вузол", () => SetTool(ElementKind.Junction, "Вузол: клацни кінець, сегмент або перетин ліній. Звичайний перетин без точки не є з’єднанням."));
         AddButton(tools, "Текст", () => SetTool(ElementKind.Text, "Текст: клацни місце розташування. Подвійний клік редагує наявний напис."));
-        AddButton(tools, "Провідник", () => SetTool(ElementKind.Wire, "Провідник: кліки задають ортогональну трасу; число → довжина → Tab → довільний кут → Enter. Повторний Enter завершує."));
         symbolPicker.ItemTemplate = new FuncDataTemplate<SymbolDefinition>((item, _) => new TextBlock { Text = item?.Name ?? "" });
         symbolPicker.SelectionChanged += (_, _) => { if (symbolPicker.SelectedItem is SymbolDefinition item) canvas.ActiveSymbolKey = item.Key; };
         tools.Children.Add(symbolPicker); RefreshSymbolPicker();
@@ -76,6 +81,14 @@ public sealed class MainWindow : Window
         var step = new NumericUpDown { Minimum = .1m, Maximum = 100, Increment = .5m, Value = 2.5m, Width = 140 };
         step.ValueChanged += (_, _) => { canvas.GridStep = (double)(step.Value ?? 2.5m); canvas.InvalidateVisual(); };
         settings.Children.Add(step);
+        var pathTypeButton = new Button { Content = "Тип: провідник", Margin = new Thickness(14, 2, 2, 2), Padding = new Thickness(9, 5) };
+        pathTypeButton.Click += (_, _) =>
+        {
+            var kind = canvas.ActivePathKind == ElementKind.Wire ? ElementKind.Line : ElementKind.Wire;
+            canvas.SetPathKind(kind);
+            pathTypeButton.Content = kind == ElementKind.Wire ? "Тип: провідник" : "Тип: графіка";
+        };
+        settings.Children.Add(pathTypeButton);
         var angleSteps = new[] { 0d, 15d, 30d, 45d };
         var angleIndex = 0;
         var angleButton = new Button { Content = "Кут: вільно", Margin = new Thickness(14, 2, 2, 2), Padding = new Thickness(9, 5) };
@@ -97,6 +110,8 @@ public sealed class MainWindow : Window
             Text = "A3 · мм   |   Esc: вибір/переміщення · Колесо: масштаб · Середня кнопка: панорама · Shift: додати · Ctrl+C/V: копія · Ctrl+R: поворот",
             FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(12, 0, 12, 8)
         });
+        var properties = new PropertyPanel(session, message => status.Text = message);
+        DockPanel.SetDock(properties, Dock.Right); root.Children.Add(properties);
         root.Children.Add(canvas); Content = root;
         canvas.Status += message => status.Text = message;
         canvas.TextPlacementRequested += async request =>

@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using ECAD.Core;
 using ECAD.Desktop;
 
@@ -186,7 +187,7 @@ Check("Application errors are persisted with context and exception details", () 
 Check("ZIP round-trip preserves geometry and groups, overwrite remains readable", () =>
 {
     var group = Guid.NewGuid();
-    var doc = new DrawingDocument { Elements = [Line() with { GroupId = group }, Line(5) with { GroupId = group }] };
+    var doc = new DrawingDocument { Elements = [Line() with { GroupId = group, Name = "Живлення" }, Line(5) with { GroupId = group }] };
     var path = Path.Combine(output, "roundtrip.ecad");
     ProjectFile.Save(path, doc); var read = ProjectFile.Open(path);
     Assert(read.Elements.SequenceEqual(doc.Elements)); Near(read.WidthMm, 420);
@@ -221,7 +222,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 6 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 7 && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -305,7 +306,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 6);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 7);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -372,7 +373,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 6); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 7); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -402,6 +403,15 @@ Check("Angle step modes snap pointer lines and wires to selected increments", ()
     var wire = interactive.Document.Elements.Single();
     Assert(wire.Points!.Length == 2); Near(Geometry.Angle(wire.B - wire.A), 45);
     liveCanvas.SetAngleSnap(0);
+});
+Check("One path tool switches between electrical and graphical lines", () =>
+{
+    liveCanvas.SetPathKind(ElementKind.Wire); liveCanvas.ActivatePathTool();
+    Assert(liveCanvas.Tool == ElementKind.Wire && liveCanvas.ActivePathKind == ElementKind.Wire);
+    liveCanvas.SetPathKind(ElementKind.Line);
+    Assert(liveCanvas.Tool == ElementKind.Line && liveCanvas.ActivePathKind == ElementKind.Line);
+    liveCanvas.EscapeToSelection();
+    Assert(liveCanvas.Tool is null && liveCanvas.ActivePathKind == ElementKind.Line);
 });
 Check("Floating input: type length, Tab, angle and Enter", () =>
 {
@@ -620,6 +630,27 @@ Check("Geometry snap uses exact off-grid endpoints", () =>
     var source = Line() with { B = new(12.3, 0) };
     var pick = AssociativeDimensions.Pick([source], new(12.4, .1), .5);
     Assert(pick.Reference?.Index == 1); Near(pick.Point.X, 12.3);
+});
+Check("Property panel edits geometry, name and path type as one undoable action", () =>
+{
+    var source = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(10, 20), new(20, 20));
+    interactive.Load(new() { Elements = [source] }); interactive.Select(source, false);
+    var properties = new PropertyPanel(interactive, _ => { });
+    var propertyWindow = new Window { Width = 320, Height = 700, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    TextBox Box(string name) => properties.GetVisualDescendants().OfType<TextBox>().Single(x => x.Name == name);
+    Box("PropertyName").Text = "Живлення двигуна";
+    Box("PropertyX").Text = "25"; Box("PropertyY").Text = "30";
+    Box("PropertyLength").Text = "40"; Box("PropertyAngle").Text = "30";
+    var kind = properties.GetVisualDescendants().OfType<ComboBox>().Single(x => x.Name == "PropertyPathKind");
+    kind.SelectedIndex = 0;
+    var apply = properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties");
+    apply.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    var edited = interactive.Document.Elements.Single();
+    Assert(edited.Kind == ElementKind.Wire && edited.Name == "Живлення двигуна" && edited.A == new PointMm(25, 30));
+    Near(edited.LengthMm, 40); Near(Geometry.Angle(edited.B - edited.A), 30);
+    interactive.Undo(); Assert(interactive.Document.Elements.Single() == source);
+    propertyWindow.Close();
 });
 liveWindow.Close();
 Check("Main window refreshes and selects a newly created custom symbol", () =>
