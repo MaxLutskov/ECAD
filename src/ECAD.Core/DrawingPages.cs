@@ -39,7 +39,7 @@ public static class DrawingPages
                 Name = "Аркуш 1", WidthMm = document.WidthMm, HeightMm = document.HeightMm,
                 Format = DetectFormat(document.WidthMm, document.HeightMm), Elements = document.Elements ?? []
             };
-            return document with { SchemaVersion = 11, ActivePageId = page.Id, Pages = [page] };
+            return document with { ActivePageId = page.Id, Pages = [page] };
         }
 
         var activeId = document.Pages.Any(page => page.Id == document.ActivePageId)
@@ -55,7 +55,7 @@ public static class DrawingPages
         var active = pages.Single(page => page.Id == activeId);
         return document with
         {
-            SchemaVersion = 11, ActivePageId = activeId, Pages = pages,
+            ActivePageId = activeId, Pages = pages,
             WidthMm = active.WidthMm, HeightMm = active.HeightMm, Elements = active.Elements
         };
     }

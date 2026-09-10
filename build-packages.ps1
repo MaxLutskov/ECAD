@@ -1,4 +1,4 @@
-﻿param([string]$Version = '0.16')
+﻿param([string]$Version = '0.17')
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
@@ -27,6 +27,8 @@ foreach ($package in $packages) {
     if ($LASTEXITCODE -ne 0) { throw "Не вдалося зібрати пакет $($package.Runtime)." }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'examples/libraries/iec-automation-demo.ecadlib') -Destination $libraryDirectory.FullName
     Copy-Item -LiteralPath (Join-Path $projectRoot 'examples/libraries/drives-and-motors-demo.ecadlib') -Destination $libraryDirectory.FullName
+    $exampleProject = Join-Path $projectRoot 'examples/projects/complete-electrical-demo.ecad'
+    if (Test-Path -LiteralPath $exampleProject) { Copy-Item -LiteralPath $exampleProject -Destination $projectDirectory.FullName }
 
     [IO.File]::WriteAllText((Join-Path $libraryDirectory.FullName 'README.txt'), @"
 Тут зберігаються бібліотеки ECAD (*.ecadlib).
@@ -34,6 +36,7 @@ foreach ($package in $packages) {
 "@)
     [IO.File]::WriteAllText((Join-Path $projectDirectory.FullName 'README.txt'), @"
 ECAD автоматично відкриває цю папку для збереження та завантаження креслень (*.ecad).
+complete-electrical-demo.ecad — готовий приклад багатосторінкової електричної моделі.
 Власні підпапки проєктів можна створювати тут.
 "@)
     [IO.File]::WriteAllText((Join-Path $packageRoot 'README.txt'), @"
@@ -65,6 +68,9 @@ App — технічні файли програми; для звичайної 
     }
     if ((Get-ChildItem -LiteralPath $libraryDirectory.FullName -Filter '*.ecadlib').Count -lt 2) {
         throw "У пакеті $($package.Runtime) немає демонстраційних бібліотек."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $projectDirectory.FullName 'complete-electrical-demo.ecad'))) {
+        throw "У пакеті $($package.Runtime) немає демонстраційного електричного проєкту."
     }
 }
 

@@ -283,7 +283,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 11 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 12 && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Pages keep independent geometry, formats and title blocks in one project", () =>
 {
@@ -298,7 +298,7 @@ Check("Pages keep independent geometry, formats and title blocks in one project"
     s.SwitchPage(second); Assert(s.Document.Elements.Single().A.Y == 20);
     var path = Path.Combine(output, "multipage.ecad"); ProjectFile.Save(path, s.Document);
     var read = ProjectFile.Open(path);
-    Assert(read.SchemaVersion == 11 && read.Pages.Length == 2 && read.CrossPageReferences.Length == 0);
+    Assert(read.SchemaVersion == 12 && read.Pages.Length == 2 && read.CrossPageReferences.Length == 0);
     Assert(read.Pages.Single(page => page.Id == first).Elements.Single().A.Y == 0);
     Assert(read.Pages.Single(page => page.Id == second).Elements.Single().A.Y == 20);
     s.DeletePage(second); Assert(s.Document.Pages.Length == 1); s.Undo(); Assert(s.Document.Pages.Length == 2);
@@ -312,6 +312,55 @@ Check("Cross-page references require existing elements on different pages", () =
     Reject(() => DrawingPages.Normalize(linked with { CrossPageReferences = [link with { ToElementId = Guid.NewGuid() }] }).Validate());
     s.RemoveCrossPageReferences(second, to.Id); Assert(s.Document.CrossPageReferences.Length == 0);
     s.Undo(); Assert(s.Document.CrossPageReferences.Single().Label == "X1");
+});
+Check("Repeated symbol representations share a device and keep distinct functions", () =>
+{
+    var coil = new DrawingElement(Guid.NewGuid(), ElementKind.Symbol, new(20, 20), new(20, 20))
+        { SymbolKey = "IEC_COIL", DeviceTag = "KM1" };
+    var contact = new DrawingElement(Guid.NewGuid(), ElementKind.Symbol, new(50, 20), new(50, 20))
+        { SymbolKey = "IEC_NO_CONTACT", DeviceTag = "KM1" };
+    var s = new EditorSession(); s.Apply([coil, contact]);
+    var symbols = s.Document.Elements.Where(item => item.Kind == ElementKind.Symbol).ToArray();
+    Assert(s.Document.Devices.Length == 1 && symbols.Select(item => item.DeviceId).Distinct().Count() == 1);
+    Assert(symbols.Select(item => item.DeviceFunctionId).Distinct().Count() == 2);
+    Assert(s.Document.Devices.Single().Functions.Any(function => function.Kind == DeviceFunctionKind.Coil));
+    Assert(s.Document.Devices.Single().Functions.Any(function => function.Kind == DeviceFunctionKind.NoContact));
+});
+Check("Connected wire segments receive a stable editable net and automatic number", () =>
+{
+    var s = new EditorSession(); var first = Wire(new(0, 0), new(10, 0)); var second = Wire(new(10, 0), new(20, 0));
+    s.Apply([first, second]); var netId = s.Document.Elements[0].NetId ?? throw new Exception("Net ID missing");
+    Assert(s.Document.Elements[1].NetId == netId && s.Document.Nets.Length == 1);
+    s.UpdateNet(netId, "L+", "Живлення ПЛК", "+24VDC", "DC control", "RD", .75, true);
+    s.RenumberNets("N", 100); Assert(s.Document.Nets.Single().Number == "L+");
+    var path = Path.Combine(output, "stable-net.ecad"); ProjectFile.Save(path, s.Document);
+    var read = ProjectFile.Open(path); Assert(read.Elements.All(item => item.NetId == netId));
+    Assert(read.Nets.Single().Potential == "+24VDC" && read.Nets.Single().CrossSectionMm2 == .75);
+});
+Check("Terminal strips and cable cores validate and participate in ERC", () =>
+{
+    var s = new EditorSession(); s.Add(Wire(new(0, 0), new(10, 0))); var net = s.Document.Nets.Single();
+    var strip = s.CreateTerminalStrip("X1", "Польові клеми", 2);
+    var cable = s.CreateCable("W1", "4G1.5", 2, 1.5, 12, "X1", "M1");
+    var cores = cable.Cores.Select((core, index) => index == 0
+        ? core with { Status = CableCoreStatus.Used, NetId = net.Id } : core).ToArray();
+    s.UpdateCable(cable with { Cores = cores });
+    Assert(s.Document.TerminalStrips.Single().Id == strip.Id && s.Document.Cables.Single().Cores[0].NetId == net.Id);
+    Assert(!ElectricalRuleChecker.Check(s.Document).Any(issue => issue.Kind == ElectricalIssueKind.InvalidCableCore));
+    s.UpdateCable(s.Document.Cables.Single() with { Cores = cores.Select((core, index) => index == 1 ? core with { NetId = net.Id } : core).ToArray() });
+    Assert(ElectricalRuleChecker.Check(s.Document).Any(issue => issue.Kind == ElectricalIssueKind.InvalidCableCore));
+});
+Check("Complete electrical example includes every 0.17 model and round-trips", () =>
+{
+    var example = ExampleElectricalProject.Create();
+    Assert(example.Pages.Length == 2 && example.Devices.Length >= 4 && example.Nets.Length >= 7);
+    Assert(example.Devices.Single(device => device.Tag == "KM1").Functions.Length == 2);
+    Assert(example.TerminalStrips.Single().Terminals.Length == 4 && example.Cables.Single().Cores.Length == 4);
+    Assert(example.CrossPageReferences.Length == 1 && example.ComponentLibraries.Length == 2);
+    var path = Path.Combine(output, "complete-electrical-demo.ecad"); ProjectFile.Save(path, example);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12 && read.Cables.Single().Tag == "W1");
+    var distributed = ProjectFile.Open(Path.Combine("examples", "projects", "complete-electrical-demo.ecad"));
+    Assert(distributed.Pages.Length == 2 && distributed.Devices.Any(device => device.Tag == "KM1"));
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -352,7 +401,7 @@ Check("Device catalog supports arbitrary configuration axes and physical variant
 
     var path = Path.Combine(output, "device-catalog.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path); var restored = ComponentCatalog.FindVariant(reopened, variant.Id)!;
-    Assert(reopened.SchemaVersion == 11 && restored.Variant.PhysicalRepresentations.Length == 2);
+    Assert(reopened.SchemaVersion == 12 && restored.Variant.PhysicalRepresentations.Length == 2);
     Assert(reopened.Elements.Single().ComponentVariantId == variant.Id);
     s.Undo(); Assert(s.Document.Elements.Single().ComponentVariantId is null);
     s.Redo(); Assert(s.Document.Elements.Single().ComponentVariantId == variant.Id);
@@ -511,7 +560,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 11);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -544,7 +593,7 @@ Check("Driving aligned dimension resizes a line and connected geometry atomicall
     Near(s.Document.Elements[3].DimensionValueMm, 24.75);
     var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path);
-    Assert(reopened.SchemaVersion == 11 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Assert(reopened.SchemaVersion == 12 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
     Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
     s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
 });
@@ -657,7 +706,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 11); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -878,7 +927,7 @@ Check("Pointer tool creates a three-point arc and stores it in project format", 
     var arc = interactive.Document.Elements.Single();
     Assert(arc.Kind == ElementKind.Arc); Near(arc.LengthMm, 20); Near(Math.Abs(arc.ArcSweepDegrees), 180);
     var path = Path.Combine(output, "arc-polyline.ecad"); ProjectFile.Save(path, interactive.Document);
-    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 11 && reopened.Elements.Single().Kind == ElementKind.Arc);
+    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 12 && reopened.Elements.Single().Kind == ElementKind.Arc);
     using var frame = liveWindow.CaptureRenderedFrame() ?? throw new Exception("No arc render");
     frame.Save(Path.Combine(output, "arc-tool.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
 });
@@ -1125,6 +1174,17 @@ Check("Library editor creates every hierarchy level and searches variants", () =
     dialog.Close();
 });
 liveWindow.Close();
+Check("Electrical project navigator renders devices, nets, terminals and cables", () =>
+{
+    var projectSession = new EditorSession(); projectSession.Load(ExampleElectricalProject.Create());
+    var window = new ElectricalProjectWindow(projectSession); window.Show(); Dispatcher.UIThread.RunJobs();
+    var text = string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(item => item.Text));
+    Assert(text.Contains("Пристроїв:") && text.Contains("Кіл:") && text.Contains("Клемників:") && text.Contains("Кабелів:"));
+    Assert(window.GetVisualDescendants().OfType<TabItem>().Count() == 4);
+    using (var frame = window.CaptureRenderedFrame() ?? throw new Exception("No rendered electrical navigator"))
+        frame.Save(Path.Combine(output, "electrical-project.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+    window.Close();
+});
 Check("Main window refreshes and selects a newly created custom symbol", () =>
 {
     var main = new MainWindow(); main.Show();

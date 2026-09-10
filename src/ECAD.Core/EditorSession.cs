@@ -8,7 +8,7 @@ public sealed class EditorSession
     private readonly Stack<DrawingDocument> redo = [];
     private DrawingElement[] clipboard = [];
     private int pasteCount;
-    public DrawingDocument Document { get; private set; } = DrawingPages.Normalize(new());
+    public DrawingDocument Document { get; private set; } = ElectricalProjectModel.Normalize(new());
     public HashSet<Guid> Selection { get; } = [];
     public bool CanUndo => undo.Count > 0;
     public bool CanRedo => redo.Count > 0;
@@ -123,6 +123,105 @@ public sealed class EditorSession
         ApplyDocument(Document with { CrossPageReferences = Document.CrossPageReferences.Where(reference =>
             !(reference.FromPageId == pageId && reference.FromElementId == elementId) &&
             !(reference.ToPageId == pageId && reference.ToElementId == elementId)).ToArray() });
+
+    public void UpdateNet(Guid netId, string number, string? description, string? potential,
+        string? signalClass, string? color, double? crossSectionMm2, bool numberLocked = false)
+    {
+        if (string.IsNullOrWhiteSpace(number)) throw new InvalidDataException("Вкажи номер провідника.");
+        var net = Document.Nets.SingleOrDefault(item => item.Id == netId)
+            ?? throw new InvalidDataException("Не знайдено електричне коло.");
+        ApplyDocument(Document with { Nets = Document.Nets.Select(item => item.Id == netId ? net with
+        {
+            Number = number.Trim(), Description = Optional(description), Potential = Optional(potential),
+            SignalClass = Optional(signalClass), Color = Optional(color), CrossSectionMm2 = crossSectionMm2,
+            NumberLocked = numberLocked
+        } : item).ToArray() });
+    }
+
+    public void ApplyElementsAndNet(DrawingElement[] elements, ProjectNet updatedNet)
+    {
+        if (!Document.Nets.Any(net => net.Id == updatedNet.Id)) throw new InvalidDataException("Не знайдено електричне коло.");
+        ApplyDocument(Document with
+        {
+            Elements = elements,
+            Nets = Document.Nets.Select(net => net.Id == updatedNet.Id ? updatedNet : net).ToArray()
+        });
+    }
+
+    public void ApplyElementsAndDevice(DrawingElement[] activeElements, DrawingElement updatedSymbol)
+    {
+        if (updatedSymbol.DeviceId is not { } deviceId) { Apply(activeElements); return; }
+        var device = Document.Devices.SingleOrDefault(item => item.Id == deviceId)
+            ?? throw new InvalidDataException("Не знайдено пристрій проєкту.");
+        var activePage = Document.ActivePageId;
+        var pages = Document.Pages.Select(page => page.Id == activePage ? page with { Elements = activeElements } : page).ToArray();
+        pages = pages.Select(page =>
+        {
+            var owned = page.Elements.Where(element => element.Kind == ElementKind.Symbol && element.DeviceId == deviceId)
+                .Select(element => element.Id).ToHashSet();
+            return page with { Elements = page.Elements.Select(element =>
+                element.Kind == ElementKind.Symbol && element.DeviceId == deviceId ? element with { DeviceTag = updatedSymbol.DeviceTag } :
+                element.LinkedElementId is { } owner && owned.Contains(owner) ? element with { Text = updatedSymbol.DeviceTag } : element).ToArray() };
+        }).ToArray();
+        var current = pages.Single(page => page.Id == activePage);
+        ApplyDocument(Document with
+        {
+            Pages = pages, Elements = current.Elements,
+            Devices = Document.Devices.Select(item => item.Id == deviceId ? device with
+            {
+                Tag = updatedSymbol.DeviceTag!, Description = updatedSymbol.Name,
+                ComponentVariantId = updatedSymbol.ComponentVariantId ?? device.ComponentVariantId,
+                PhysicalRepresentationId = updatedSymbol.PhysicalRepresentationId ?? device.PhysicalRepresentationId
+            } : item).ToArray()
+        });
+    }
+
+    public void RenumberNets(string prefix = "", int start = 1, int step = 1)
+    {
+        if (start < 0 || step < 1) throw new InvalidDataException("Некоректні параметри нумерації.");
+        var next = start;
+        var nets = Document.Nets.Select(net => net.NumberLocked ? net : net with { Number = prefix + next++ }).ToArray();
+        ApplyDocument(Document with { Nets = nets });
+    }
+
+    public TerminalStrip CreateTerminalStrip(string tag, string? description, int terminalCount,
+        TerminalKind kind = TerminalKind.FeedThrough)
+    {
+        if (string.IsNullOrWhiteSpace(tag) || terminalCount is < 1 or > 10000)
+            throw new InvalidDataException("Вкажи позначення та правильну кількість клем.");
+        var strip = new TerminalStrip(Guid.NewGuid(), tag.Trim(), Optional(description),
+            Enumerable.Range(1, terminalCount).Select(number =>
+                new ProjectTerminal(Guid.NewGuid(), number.ToString(), 1, kind)).ToArray());
+        ApplyDocument(Document with { TerminalStrips = [.. Document.TerminalStrips, strip] });
+        return strip;
+    }
+
+    public void AssignTerminal(Guid symbolId, Guid terminalId)
+    {
+        if (!Document.TerminalStrips.SelectMany(strip => strip.Terminals).Any(item => item.Id == terminalId))
+            throw new InvalidDataException("Не знайдено клему.");
+        var symbol = Document.Elements.SingleOrDefault(item => item.Id == symbolId && item.Kind == ElementKind.Symbol)
+            ?? throw new InvalidDataException("Виділений елемент не є символом.");
+        Apply(Document.Elements.Select(item => item.Id == symbol.Id ? item with { TerminalId = terminalId } : item).ToArray());
+    }
+
+    public ProjectCable CreateCable(string tag, string? type, int coreCount, double? crossSectionMm2,
+        double? lengthM, string? from, string? to)
+    {
+        if (string.IsNullOrWhiteSpace(tag) || coreCount is < 1 or > 10000)
+            throw new InvalidDataException("Вкажи позначення та правильну кількість жил.");
+        var cable = new ProjectCable(Guid.NewGuid(), tag.Trim(), Optional(type), coreCount, crossSectionMm2, lengthM,
+            Optional(from), Optional(to), Enumerable.Range(1, coreCount).Select(number =>
+                new CableCore(Guid.NewGuid(), number.ToString(), CableCoreStatus.Spare)).ToArray());
+        ApplyDocument(Document with { Cables = [.. Document.Cables, cable] });
+        return cable;
+    }
+
+    public void UpdateCable(ProjectCable cable)
+    {
+        if (!Document.Cables.Any(item => item.Id == cable.Id)) throw new InvalidDataException("Не знайдено кабель.");
+        ApplyDocument(Document with { Cables = Document.Cables.Select(item => item.Id == cable.Id ? cable : item).ToArray() });
+    }
 
     public SymbolDefinition CreateCustomSymbol(string name, string prefix)
     {
@@ -455,10 +554,10 @@ public sealed class EditorSession
 
     private static DrawingDocument Normalize(DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 11)
+        if (document.SchemaVersion is < 1 or > 12)
             throw new InvalidDataException("Непідтримувана версія документа.");
         var elements = DrivingDimensions.ApplyAll(document.Elements);
-        var normalized = DrawingPages.Normalize(document with { SchemaVersion = 11, Elements = elements });
+        var normalized = ElectricalProjectModel.Normalize(document with { SchemaVersion = 12, Elements = elements });
         normalized.Validate();
         return normalized;
     }

@@ -696,6 +696,7 @@ public sealed class DrawingCanvas : Decorator
             case ElementKind.Line: ctx.DrawLine(pen, a, b); break;
             case ElementKind.Wire:
                 for (var i = 1; i < e.Points!.Length; i++) ctx.DrawLine(pen, Screen(e.Points[i - 1]), Screen(e.Points[i]));
+                DrawNetLabel(ctx, e);
                 break;
             case ElementKind.Polyline:
                 for (var i = 1; i < e.Points!.Length; i++) ctx.DrawLine(pen, Screen(e.Points[i - 1]), Screen(e.Points[i]));
@@ -742,6 +743,18 @@ public sealed class DrawingCanvas : Decorator
             foreach (var p in AssociativeDimensions.Vertices(e).DefaultIfEmpty(e.A).Distinct().Select(Screen))
                 ctx.DrawRectangle(Brushes.White, new Pen(brush, 1), new Rect(p.X - 3, p.Y - 3, 6, 6));
         DrawCrossPageMarker(ctx, e);
+    }
+
+    private void DrawNetLabel(DrawingContext context, DrawingElement wire)
+    {
+        var net = session.Document.Nets.FirstOrDefault(item => item.Id == wire.NetId);
+        if (net is null || wire.Points is not { Length: >= 2 }) return;
+        var middle = (wire.Points[0] + wire.Points[1]) * .5;
+        var text = new FormattedText(net.Number, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            Typeface.Default, Math.Max(7, 2.8 * scale), Brushes.DarkGreen);
+        var at = Screen(middle + new PointMm(0, -1.5));
+        context.DrawRectangle(Brushes.White, null, new Rect(at.X - 2, at.Y - text.Height, text.Width + 4, text.Height + 2));
+        context.DrawText(text, new Point(at.X, at.Y - text.Height));
     }
 
     private void DrawCrossPageMarker(DrawingContext context, DrawingElement element)

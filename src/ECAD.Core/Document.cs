@@ -33,6 +33,10 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
     public Guid? LinkedElementId { get; init; }
     public Guid? ComponentVariantId { get; init; }
     public Guid? PhysicalRepresentationId { get; init; }
+    public Guid? DeviceId { get; init; }
+    public Guid? DeviceFunctionId { get; init; }
+    public Guid? NetId { get; init; }
+    public Guid? TerminalId { get; init; }
     public double ArcSweepDegrees { get; init; }
     [JsonIgnore] public double LengthMm => (B - A).Length;
     [JsonIgnore] public double DimensionValueMm => DimensionType switch
@@ -105,19 +109,23 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 11;
+    public int SchemaVersion { get; init; } = 12;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
     public Guid ActivePageId { get; init; }
     public DrawingPage[] Pages { get; init; } = [];
     public CrossPageReference[] CrossPageReferences { get; init; } = [];
+    public ProjectDevice[] Devices { get; init; } = [];
+    public ProjectNet[] Nets { get; init; } = [];
+    public TerminalStrip[] TerminalStrips { get; init; } = [];
+    public ProjectCable[] Cables { get; init; } = [];
     public SymbolDefinition[] CustomSymbols { get; init; } = [];
     public ComponentLibrary[] ComponentLibraries { get; init; } = [];
 
     public void Validate()
     {
-        if (SchemaVersion is < 1 or > 11) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > 12) throw new InvalidDataException("Непідтримувана версія документа.");
         if (Pages is null || Pages.Length > 100 || CrossPageReferences is null || CrossPageReferences.Length > 10000)
             throw new InvalidDataException("Некоректна структура сторінок.");
         if (Pages.Length > 0)
@@ -190,6 +198,7 @@ public sealed record DrawingDocument
             throw new InvalidDataException("Некоректне посилання текстового позначення.");
         _ = AssociativeDimensions.ResolveAll(Elements);
         DrivingDimensions.Validate(Elements);
+        if (Pages.Length > 0) ElectricalProjectModel.Validate(this);
     }
 
     private static bool ValidComponentLink(DrawingElement element,

@@ -37,7 +37,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.16  /  Багатосторінковий проєкт", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.17  /  Електрична модель проєкту", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
@@ -77,6 +77,7 @@ public sealed class MainWindow : Window
         AddIconButton(edit, "×", "Видалити (Delete)", () => { canvas.Cancel(); session.Delete(); });
         var checks = AddToolbarGroup(commands, "Перевірка і вигляд");
         AddAsyncIconButton(checks, "✓", "Перевірити схему", ShowElectricalIssues);
+        AddAsyncIconButton(checks, "⚡", "Електрична модель проєкту", ShowElectricalProject);
         AddAsyncIconButton(checks, "!", "Журнал помилок", ShowErrorLog);
         AddIconButton(checks, "□", "Вмістити аркуш у вікно", canvas.Fit);
         var workspace = new WrapPanel { Margin = new Thickness(8, 0, 8, 5) };
@@ -501,7 +502,7 @@ public sealed class MainWindow : Window
 
     private async Task ShowElectricalIssues()
     {
-        canvas.Cancel(); var issues = ElectricalRuleChecker.Check(session.Document.Elements);
+        canvas.Cancel(); var issues = ElectricalRuleChecker.Check(session.Document);
         if (issues.Length == 0) { status.Text = "Перевірка завершена: обривів і дублів не знайдено."; return; }
         var dialog = new Window
         {
@@ -514,6 +515,12 @@ public sealed class MainWindow : Window
         root.Children.Add(new ListBox { ItemsSource = issues.Select(i => i.Message).ToArray() });
         dialog.Content = root; await dialog.ShowDialog(this);
         status.Text = $"Перевірка схеми: знайдено проблем — {issues.Length}.";
+    }
+
+    private async Task ShowElectricalProject()
+    {
+        canvas.Cancel(); await new ElectricalProjectWindow(session).ShowDialog(this);
+        status.Text = "Електричну модель проєкту оновлено.";
     }
 
     private async Task<bool> CanDiscard()

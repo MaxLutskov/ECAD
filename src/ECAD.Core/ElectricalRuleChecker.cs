@@ -1,7 +1,7 @@
 namespace ECAD.Core;
 
-public enum ElectricalIssueKind { UnconnectedPin, DanglingWireEnd, DuplicateDeviceTag }
-public sealed record ElectricalIssue(ElectricalIssueKind Kind, Guid ElementId, string Message);
+public enum ElectricalIssueKind { UnconnectedPin, DanglingWireEnd, DuplicateDeviceTag, FunctionUsedTwice, MissingDeviceModel, InvalidCableCore }
+public sealed record ElectricalIssue(ElectricalIssueKind Kind, Guid ElementId, string Message, Guid? PageId = null);
 
 public static class ElectricalRuleChecker
 {
@@ -38,6 +38,28 @@ public static class ElectricalRuleChecker
             foreach (var symbol in group)
                 issues.Add(new(ElectricalIssueKind.DuplicateDeviceTag, symbol.Id,
                     $"Дубль символу в одній точці: {symbol.DeviceTag}."));
+        return [.. issues];
+    }
+
+    public static ElectricalIssue[] Check(DrawingDocument document)
+    {
+        var issues = document.Pages.SelectMany(page => Check(page.Elements)
+            .Select(issue => issue with { PageId = page.Id, Message = $"Аркуш {page.Number}, {issue.Message}" })).ToList();
+        foreach (var group in document.Pages.SelectMany(page => page.Elements.Select(element => (page, element)))
+            .Where(item => item.element.Kind == ElementKind.Symbol && item.element.DeviceFunctionId is not null)
+            .GroupBy(item => item.element.DeviceFunctionId).Where(group => group.Count() > 1))
+            foreach (var item in group)
+                issues.Add(new(ElectricalIssueKind.FunctionUsedTwice, item.element.Id,
+                    $"Аркуш {item.page.Number}: функцію пристрою використано більше одного разу.", item.page.Id));
+        foreach (var item in document.Pages.SelectMany(page => page.Elements.Select(element => (page, element)))
+            .Where(item => item.element.Kind == ElementKind.Symbol && item.element.ComponentVariantId is null))
+            issues.Add(new(ElectricalIssueKind.MissingDeviceModel, item.element.Id,
+                $"Аркуш {item.page.Number}: {item.element.DeviceTag} не має варіанта пристрою з бібліотеки.", item.page.Id));
+        foreach (var cable in document.Cables)
+            foreach (var core in cable.Cores.Where(core => core.Status == CableCoreStatus.Used && core.NetId is null ||
+                core.Status == CableCoreStatus.Spare && core.NetId is not null))
+                issues.Add(new(ElectricalIssueKind.InvalidCableCore, core.FromElementId ?? core.ToElementId ?? Guid.Empty,
+                    $"Кабель {cable.Tag}, жила {core.Designation}: статус не відповідає призначенню кола."));
         return [.. issues];
     }
 }

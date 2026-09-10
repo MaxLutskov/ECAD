@@ -73,6 +73,8 @@ public sealed class PropertyPanel : Border
         ComboBox? dimensionType = null;
         ComboBox? componentVariant = null;
         ComboBox? physicalRepresentation = null;
+        ComboBox? terminal = null;
+        ProjectNet? electricalNet = null;
         if (element.Kind is ElementKind.Line or ElementKind.Wire)
         {
             pathKind = new ComboBox
@@ -103,6 +105,17 @@ public sealed class PropertyPanel : Border
                 {
                     Field("Length", "Загальна довжина, мм", PathLength(element), true);
                     Field("Segments", "Кількість сегментів", element.Points.Length - 1, true);
+                }
+                electricalNet = session.Document.Nets.FirstOrDefault(net => net.Id == element.NetId);
+                if (electricalNet is not null)
+                {
+                    panel.Children.Add(new TextBlock { Text = "Електричне коло", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) });
+                    Field("NetNumber", "Номер провідника", electricalNet.Number);
+                    Field("NetDescription", "Опис сигналу", electricalNet.Description);
+                    Field("NetPotential", "Потенціал", electricalNet.Potential);
+                    Field("NetClass", "Клас сигналу", electricalNet.SignalClass);
+                    Field("NetColor", "Колір", electricalNet.Color);
+                    Field("NetSection", "Переріз, мм²", electricalNet.CrossSectionMm2);
                 }
                 break;
             case ElementKind.Polyline:
@@ -140,6 +153,21 @@ public sealed class PropertyPanel : Border
                 var definition = SymbolLibrary.Get(session.Document, element.SymbolKey!);
                 Field("LibraryName", "Назва в бібліотеці", definition.Name, true);
                 Field("PinCount", "Кількість контактів", (element.PinOffsets ?? definition.Pins).Length, true);
+                var projectDevice = session.Document.Devices.FirstOrDefault(device => device.Id == element.DeviceId);
+                var deviceFunction = projectDevice?.Functions.FirstOrDefault(function => function.Id == element.DeviceFunctionId);
+                if (projectDevice is not null)
+                    panel.Children.Add(SectionNote("Функція пристрою",
+                        $"Пристрій: {projectDevice.Tag}\nФункція: {deviceFunction?.Name ?? "—"}\n" +
+                        $"Тип: {deviceFunction?.Kind.ToString() ?? "—"}\nКонтакти: {(deviceFunction is null ? "—" : string.Join(", ", deviceFunction.Terminals))}"));
+                if (element.SymbolKey == "IEC_TERMINAL" && session.Document.TerminalStrips.Length > 0)
+                {
+                    panel.Children.Add(new TextBlock { Text = "Клема проєкту", FontSize = 12, Foreground = Brushes.DimGray });
+                    var terminalChoices = session.Document.TerminalStrips.SelectMany(strip => strip.Terminals.Select(item =>
+                        new TerminalChoice(item.Id, $"{strip.Tag}:{item.Number}"))).ToArray();
+                    terminal = new ComboBox { Name = "PropertyTerminal", ItemsSource = terminalChoices };
+                    terminal.SelectedItem = terminalChoices.FirstOrDefault(item => item.Id == element.TerminalId);
+                    panel.Children.Add(terminal);
+                }
                 panel.Children.Add(new TextBlock { Text = "Варіант пристрою", FontSize = 12, Foreground = Brushes.DimGray });
                 var variantChoices = new[] { new VariantChoice(null, "Без моделі пристрою", null) }
                     .Concat(ComponentCatalog.Variants(session.Document).Where(item => item.Variant.SymbolKey == element.SymbolKey)
@@ -220,7 +248,7 @@ public sealed class PropertyPanel : Border
         {
             try
             {
-                Apply(element.Id, fields, pathKind, dimensionType, dimensionMode, componentVariant, physicalRepresentation);
+                Apply(element.Id, fields, pathKind, dimensionType, dimensionMode, componentVariant, physicalRepresentation, electricalNet, terminal);
                 report("Властивості об’єкта оновлено.");
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or ArgumentOutOfRangeException)
@@ -241,7 +269,7 @@ public sealed class PropertyPanel : Border
 
     private void Apply(Guid id, Dictionary<string, TextBox> fields, ComboBox? pathKind,
         ComboBox? dimensionType, ComboBox? dimensionMode, ComboBox? componentVariant,
-        ComboBox? physicalRepresentation)
+        ComboBox? physicalRepresentation, ProjectNet? electricalNet, ComboBox? terminal)
     {
         var source = session.Document.Elements.Single(e => e.Id == id);
         var name = fields["Name"].Text?.Trim();
@@ -319,7 +347,8 @@ public sealed class PropertyPanel : Border
                 updated = updated with
                 {
                     A = Position(), B = Position(), DeviceTag = tag, RotationDegrees = Number(fields, "Rotation"),
-                    ComponentVariantId = variant?.Id, PhysicalRepresentationId = variant?.Id is null ? null : physical?.Id
+                    ComponentVariantId = variant?.Id, PhysicalRepresentationId = variant?.Id is null ? null : physical?.Id,
+                    TerminalId = (terminal?.SelectedItem as TerminalChoice)?.Id ?? source.TerminalId
                 };
                 break;
             }
@@ -348,7 +377,21 @@ public sealed class PropertyPanel : Border
                 return e with { DeviceTag = updated.Text };
             return e;
         }).ToArray();
-        session.Apply(elements);
+        if (source.Kind == ElementKind.Symbol) session.ApplyElementsAndDevice(elements, updated);
+        else if (electricalNet is null) session.Apply(elements);
+        else
+        {
+            var number = fields["NetNumber"].Text?.Trim();
+            if (string.IsNullOrWhiteSpace(number)) throw new InvalidDataException("Номер провідника не може бути порожнім.");
+            var sectionText = fields["NetSection"].Text?.Trim();
+            double? section = string.IsNullOrWhiteSpace(sectionText) ? null : Positive(fields, "NetSection");
+            session.ApplyElementsAndNet(elements, electricalNet with
+            {
+                Number = number, Description = Optional(fields["NetDescription"].Text),
+                Potential = Optional(fields["NetPotential"].Text), SignalClass = Optional(fields["NetClass"].Text),
+                Color = Optional(fields["NetColor"].Text), CrossSectionMm2 = section
+            });
+        }
     }
 
     private static double Number(Dictionary<string, TextBox> fields, string key)
@@ -366,6 +409,7 @@ public sealed class PropertyPanel : Border
         if (value <= 0) throw new InvalidDataException("Розмір має бути більшим за нуль.");
         return value;
     }
+    private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string Format(double value) => value.ToString("0.###", CultureInfo.CurrentCulture);
     private static double PathLength(DrawingElement element)
@@ -411,5 +455,7 @@ public sealed class PropertyPanel : Border
     private sealed record VariantChoice(Guid? Id, string Label, DeviceVariantContext? Context)
     { public override string ToString() => Label; }
     private sealed record PhysicalChoice(Guid Id, string Label)
+    { public override string ToString() => Label; }
+    private sealed record TerminalChoice(Guid Id, string Label)
     { public override string ToString() => Label; }
 }

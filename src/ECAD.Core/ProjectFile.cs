@@ -8,8 +8,8 @@ public static class ProjectFile
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
     public static void Save(string path, DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 11) throw new InvalidDataException("Непідтримувана версія документа.");
-        document = DrawingPages.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
+        if (document.SchemaVersion is < 1 or > 12) throw new InvalidDataException("Непідтримувана версія документа.");
+        document = ElectricalProjectModel.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
         document.Validate();
         path = Path.GetFullPath(path);
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -37,9 +37,9 @@ public static class ProjectFile
         using var stream = entry.Open();
         var document = JsonSerializer.Deserialize<DrawingDocument>(stream, Options)
             ?? throw new InvalidDataException("Порожній документ.");
-        if (document.SchemaVersion is < 1 or > 11) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (document.SchemaVersion is < 1 or > 12) throw new InvalidDataException("Непідтримувана версія документа.");
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
-        document = DrawingPages.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
+        document = ElectricalProjectModel.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
         document.Validate();
         return document;
     }
