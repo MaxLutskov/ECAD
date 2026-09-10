@@ -283,7 +283,35 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 10 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 11 && label.Text == "M1" && label.Kind == ElementKind.Text);
+});
+Check("Pages keep independent geometry, formats and title blocks in one project", () =>
+{
+    var s = new EditorSession(); var first = s.ActivePage.Id;
+    s.Add(Line());
+    s.AddPage("Керування", PaperFormat.A4Portrait, true, 6, 8,
+        new PageTitleBlock { Project = "Шафа 1", Drawing = "Керування", Author = "MX", Revision = "A" });
+    var second = s.ActivePage.Id; s.Add(Line(20));
+    Assert(s.Document.Pages.Length == 2 && s.ActivePage.Format == PaperFormat.A4Portrait);
+    Assert(s.ActivePage.Elements.Length == 1 && s.ActivePage.TitleBlock.Project == "Шафа 1");
+    s.SwitchPage(first); Assert(s.Document.Elements.Single().A.Y == 0);
+    s.SwitchPage(second); Assert(s.Document.Elements.Single().A.Y == 20);
+    var path = Path.Combine(output, "multipage.ecad"); ProjectFile.Save(path, s.Document);
+    var read = ProjectFile.Open(path);
+    Assert(read.SchemaVersion == 11 && read.Pages.Length == 2 && read.CrossPageReferences.Length == 0);
+    Assert(read.Pages.Single(page => page.Id == first).Elements.Single().A.Y == 0);
+    Assert(read.Pages.Single(page => page.Id == second).Elements.Single().A.Y == 20);
+    s.DeletePage(second); Assert(s.Document.Pages.Length == 1); s.Undo(); Assert(s.Document.Pages.Length == 2);
+});
+Check("Cross-page references require existing elements on different pages", () =>
+{
+    var s = new EditorSession(); var first = s.ActivePage.Id; var from = Line(); s.Add(from);
+    s.AddPage("Силова", PaperFormat.A3Landscape); var second = s.ActivePage.Id; var to = Line(5); s.Add(to);
+    s.AddCrossPageReference(first, from.Id, second, to.Id, "X1");
+    var linked = s.Document; var link = linked.CrossPageReferences.Single(); linked.Validate();
+    Reject(() => DrawingPages.Normalize(linked with { CrossPageReferences = [link with { ToElementId = Guid.NewGuid() }] }).Validate());
+    s.RemoveCrossPageReferences(second, to.Id); Assert(s.Document.CrossPageReferences.Length == 0);
+    s.Undo(); Assert(s.Document.CrossPageReferences.Single().Label == "X1");
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -324,7 +352,7 @@ Check("Device catalog supports arbitrary configuration axes and physical variant
 
     var path = Path.Combine(output, "device-catalog.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path); var restored = ComponentCatalog.FindVariant(reopened, variant.Id)!;
-    Assert(reopened.SchemaVersion == 10 && restored.Variant.PhysicalRepresentations.Length == 2);
+    Assert(reopened.SchemaVersion == 11 && restored.Variant.PhysicalRepresentations.Length == 2);
     Assert(reopened.Elements.Single().ComponentVariantId == variant.Id);
     s.Undo(); Assert(s.Document.Elements.Single().ComponentVariantId is null);
     s.Redo(); Assert(s.Document.Elements.Single().ComponentVariantId == variant.Id);
@@ -483,7 +511,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 11);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -516,7 +544,7 @@ Check("Driving aligned dimension resizes a line and connected geometry atomicall
     Near(s.Document.Elements[3].DimensionValueMm, 24.75);
     var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path);
-    Assert(reopened.SchemaVersion == 10 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Assert(reopened.SchemaVersion == 11 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
     Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
     s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
 });
@@ -629,7 +657,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 10); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 11); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -850,7 +878,7 @@ Check("Pointer tool creates a three-point arc and stores it in project format", 
     var arc = interactive.Document.Elements.Single();
     Assert(arc.Kind == ElementKind.Arc); Near(arc.LengthMm, 20); Near(Math.Abs(arc.ArcSweepDegrees), 180);
     var path = Path.Combine(output, "arc-polyline.ecad"); ProjectFile.Save(path, interactive.Document);
-    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 10 && reopened.Elements.Single().Kind == ElementKind.Arc);
+    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 11 && reopened.Elements.Single().Kind == ElementKind.Arc);
     using var frame = liveWindow.CaptureRenderedFrame() ?? throw new Exception("No arc render");
     frame.Save(Path.Combine(output, "arc-tool.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
 });
@@ -1123,7 +1151,7 @@ Check("Main window renders with Ukrainian controls", () =>
 {
     var main = new MainWindow(); main.Show();
     var labels = main.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text).ToHashSet();
-    Assert(labels.Contains("Файл") && labels.Contains("Редагування") && labels.Contains("Інструменти") && labels.Contains("Параметри побудови"));
+    Assert(labels.Contains("Файл") && labels.Contains("Аркуші") && labels.Contains("Редагування") && labels.Contains("Інструменти") && labels.Contains("Параметри побудови"));
     Assert(main.GetVisualDescendants().OfType<Button>().Count(button => ToolTip.GetTip(button) is string) >= 15);
     main.MouseDown(new(500, 450), MouseButton.Left);
     main.MouseUp(new(500, 450), MouseButton.Left);

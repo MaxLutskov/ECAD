@@ -8,11 +8,12 @@ public sealed class EditorSession
     private readonly Stack<DrawingDocument> redo = [];
     private DrawingElement[] clipboard = [];
     private int pasteCount;
-    public DrawingDocument Document { get; private set; } = new();
+    public DrawingDocument Document { get; private set; } = DrawingPages.Normalize(new());
     public HashSet<Guid> Selection { get; } = [];
     public bool CanUndo => undo.Count > 0;
     public bool CanRedo => redo.Count > 0;
     public bool CanPaste => clipboard.Length > 0;
+    public DrawingPage ActivePage => Document.Pages.Single(page => page.Id == Document.ActivePageId);
     public event Action? Changed;
 
     public void Load(DrawingDocument document)
@@ -40,6 +41,88 @@ public sealed class EditorSession
         Document = document;
         redo.Clear(); Notify();
     }
+
+    public void AddPage(string? name = null, PaperFormat format = PaperFormat.A3Landscape, bool showFrame = true,
+        int horizontalZones = 8, int verticalZones = 6, PageTitleBlock? titleBlock = null)
+    {
+        var size = DrawingPages.Size(format);
+        var number = Document.Pages.Max(page => page.Number) + 1;
+        var page = new DrawingPage
+        {
+            Number = number, Name = string.IsNullOrWhiteSpace(name) ? $"Аркуш {number}" : name.Trim(),
+            Format = format, WidthMm = size.Width, HeightMm = size.Height, ShowFrame = showFrame,
+            HorizontalZones = horizontalZones, VerticalZones = verticalZones, TitleBlock = titleBlock ?? new()
+        };
+        ApplyDocument(Document with
+        {
+            Pages = [.. Document.Pages, page], ActivePageId = page.Id,
+            WidthMm = page.WidthMm, HeightMm = page.HeightMm, Elements = page.Elements
+        });
+        Selection.Clear();
+    }
+
+    public void SwitchPage(Guid pageId)
+    {
+        if (pageId == Document.ActivePageId) return;
+        var page = Document.Pages.SingleOrDefault(item => item.Id == pageId)
+            ?? throw new InvalidDataException("Не знайдено аркуш.");
+        Document = Normalize(Document with
+        {
+            ActivePageId = page.Id, WidthMm = page.WidthMm, HeightMm = page.HeightMm, Elements = page.Elements
+        });
+        Selection.Clear(); Changed?.Invoke();
+    }
+
+    public void UpdatePage(Guid pageId, string name, PaperFormat format, bool showFrame,
+        int horizontalZones, int verticalZones, PageTitleBlock titleBlock)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new InvalidDataException("Вкажи назву аркуша.");
+        var old = Document.Pages.SingleOrDefault(page => page.Id == pageId)
+            ?? throw new InvalidDataException("Не знайдено аркуш.");
+        var size = format == PaperFormat.Custom ? (old.WidthMm, old.HeightMm) : DrawingPages.Size(format);
+        var updated = old with
+        {
+            Name = name.Trim(), Format = format, WidthMm = size.Item1, HeightMm = size.Item2,
+            ShowFrame = showFrame, HorizontalZones = horizontalZones, VerticalZones = verticalZones,
+            TitleBlock = titleBlock ?? new()
+        };
+        ApplyDocument(Document with
+        {
+            Pages = Document.Pages.Select(page => page.Id == pageId ? updated : page).ToArray(),
+            WidthMm = pageId == Document.ActivePageId ? updated.WidthMm : Document.WidthMm,
+            HeightMm = pageId == Document.ActivePageId ? updated.HeightMm : Document.HeightMm,
+            Elements = pageId == Document.ActivePageId ? updated.Elements : Document.Elements
+        });
+    }
+
+    public void DeletePage(Guid pageId)
+    {
+        if (Document.Pages.Length == 1) throw new InvalidDataException("У проєкті має залишитися хоча б один аркуш.");
+        if (Document.CrossPageReferences.Any(reference => reference.FromPageId == pageId || reference.ToPageId == pageId))
+            throw new InvalidDataException("Аркуш використовується у міжсторінкових посиланнях.");
+        var pages = Document.Pages.Where(page => page.Id != pageId).OrderBy(page => page.Number)
+            .Select((page, index) => page with { Number = index + 1 }).ToArray();
+        var active = pageId == Document.ActivePageId ? pages[0] : pages.Single(page => page.Id == Document.ActivePageId);
+        ApplyDocument(Document with
+        {
+            Pages = pages, ActivePageId = active.Id, WidthMm = active.WidthMm,
+            HeightMm = active.HeightMm, Elements = active.Elements
+        });
+        Selection.Clear();
+    }
+
+    public void AddCrossPageReference(Guid fromPageId, Guid fromElementId, Guid toPageId, Guid toElementId, string? label = null)
+    {
+        if (fromPageId == toPageId) throw new InvalidDataException("Міжсторінкове посилання має вести на інший аркуш.");
+        var reference = new CrossPageReference(Guid.NewGuid(), fromPageId, fromElementId, toPageId, toElementId,
+            string.IsNullOrWhiteSpace(label) ? null : label.Trim());
+        ApplyDocument(Document with { CrossPageReferences = [.. Document.CrossPageReferences, reference] });
+    }
+
+    public void RemoveCrossPageReferences(Guid pageId, Guid elementId) =>
+        ApplyDocument(Document with { CrossPageReferences = Document.CrossPageReferences.Where(reference =>
+            !(reference.FromPageId == pageId && reference.FromElementId == elementId) &&
+            !(reference.ToPageId == pageId && reference.ToElementId == elementId)).ToArray() });
 
     public SymbolDefinition CreateCustomSymbol(string name, string prefix)
     {
@@ -372,10 +455,10 @@ public sealed class EditorSession
 
     private static DrawingDocument Normalize(DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 10)
+        if (document.SchemaVersion is < 1 or > 11)
             throw new InvalidDataException("Непідтримувана версія документа.");
         var elements = DrivingDimensions.ApplyAll(document.Elements);
-        var normalized = document with { SchemaVersion = 10, Elements = elements };
+        var normalized = DrawingPages.Normalize(document with { SchemaVersion = 11, Elements = elements });
         normalized.Validate();
         return normalized;
     }

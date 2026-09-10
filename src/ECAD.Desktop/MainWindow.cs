@@ -16,8 +16,13 @@ public sealed class MainWindow : Window
     private readonly DrawingCanvas canvas;
     private readonly TextBlock status = new() { Margin = new Thickness(12, 7) };
     private readonly ComboBox symbolPicker = new() { Width = 185, Margin = new Thickness(3) };
+    private readonly ComboBox pagePicker = new() { Width = 210, Margin = new Thickness(3) };
+    private readonly TextBlock pageInfo = new() { FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(12, 0, 12, 8) };
     private SymbolDefinition[] displayedCustomSymbols = [];
     private bool symbolRefreshPending;
+    private bool pageRefreshPending;
+    private bool refreshingPages;
+    private (Guid PageId, Guid ElementId)? pendingPageLink;
     private DrawingDocument saved;
     private string? currentPath;
     private bool allowClose;
@@ -32,7 +37,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.15  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.16  /  Багатосторінковий проєкт", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
@@ -41,6 +46,23 @@ public sealed class MainWindow : Window
         AddAsyncIconButton(files, "↗", "Відкрити…", Open);
         AddAsyncIconButton(files, "↓", "Зберегти…", Save);
         AddAsyncIconButton(files, "▤", "Бібліотеки пристроїв", ShowLibraryEditor);
+        var pages = AddToolbarGroup(commands, "Аркуші");
+        pagePicker.ItemTemplate = new FuncDataTemplate<DrawingPage>((page, _) => new TextBlock
+        {
+            Text = page is null ? "" : $"{page.Number}. {page.Name} · {FormatName(page.Format)}"
+        });
+        pagePicker.SelectionChanged += (_, _) =>
+        {
+            if (refreshingPages || pagePicker.SelectedItem is not DrawingPage page || page.Id == session.Document.ActivePageId) return;
+            var wasSaved = !IsDirty; canvas.Cancel(); session.SwitchPage(page.Id); if (wasSaved) saved = session.Document; canvas.Fit();
+            status.Text = $"Відкрито аркуш {page.Number}: {page.Name}.";
+        };
+        pages.Children.Add(pagePicker);
+        AddAsyncIconButton(pages, "+", "Додати аркуш", AddPage);
+        AddAsyncIconButton(pages, "✎", "Параметри аркуша", EditPage);
+        AddIconButton(pages, "⇄", "Зв’язати вибрані елементи на різних аркушах", CrossPageLink);
+        AddIconButton(pages, "×", "Видалити поточний аркуш (можна скасувати)", DeletePage);
+        RefreshPages();
         var edit = AddToolbarGroup(commands, "Редагування");
         AddIconButton(edit, "↶", "Скасувати (Ctrl+Z)", () => { canvas.Cancel(); session.Undo(); });
         AddIconButton(edit, "↷", "Повторити (Ctrl+Y)", () => { canvas.Cancel(); session.Redo(); });
@@ -115,11 +137,8 @@ public sealed class MainWindow : Window
         var footer = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         footer.Children.Add(status);
-        footer.Children.Add(new TextBlock
-        {
-            Text = "A3 · мм   |   L: лінія · C: коло · R: прямокутник · P: полілінія · A: дуга · D: розмір · Esc: вибір · Колесо: масштаб",
-            FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(12, 0, 12, 8)
-        });
+        footer.Children.Add(pageInfo);
+        UpdatePageInfo();
         var properties = new PropertyPanel(session, message => status.Text = message);
         DockPanel.SetDock(properties, Dock.Right); root.Children.Add(properties);
         root.Children.Add(canvas); Content = root;
@@ -152,6 +171,12 @@ public sealed class MainWindow : Window
     private void HandleSessionChanged()
     {
         UpdateTitle();
+        UpdatePageInfo();
+        if (!pageRefreshPending)
+        {
+            pageRefreshPending = true;
+            Dispatcher.UIThread.Post(() => { pageRefreshPending = false; RefreshPages(); });
+        }
         if (ReferenceEquals(displayedCustomSymbols, session.Document.CustomSymbols) || symbolRefreshPending) return;
         symbolRefreshPending = true;
         Dispatcher.UIThread.Post(() =>
@@ -160,6 +185,26 @@ public sealed class MainWindow : Window
             RefreshSymbolPicker(canvas.ActiveSymbolKey);
         });
     }
+    private void RefreshPages()
+    {
+        refreshingPages = true;
+        try
+        {
+            pagePicker.ItemsSource = session.Document.Pages.OrderBy(page => page.Number).ToArray();
+            pagePicker.SelectedItem = session.Document.Pages.Single(page => page.Id == session.Document.ActivePageId);
+        }
+        finally { refreshingPages = false; }
+    }
+    private void UpdatePageInfo()
+    {
+        var page = session.ActivePage;
+        pageInfo.Text = $"{page.Number}/{session.Document.Pages.Length} · {page.Name} · {FormatName(page.Format)} · {page.WidthMm:0.#}×{page.HeightMm:0.#} мм   |   L: лінія · C: коло · R: прямокутник · P: полілінія · A: дуга · D: розмір · Esc: вибір";
+    }
+    private static string FormatName(PaperFormat format) => format switch
+    {
+        PaperFormat.A4Portrait => "A4 книжкова", PaperFormat.A4Landscape => "A4 альбомна",
+        PaperFormat.A3Portrait => "A3 книжкова", PaperFormat.A3Landscape => "A3 альбомна", _ => "Довільний"
+    };
     private void RefreshSymbolPicker(string? selectedKey = null)
     {
         var definitions = SymbolLibrary.Definitions(session.Document);
@@ -334,6 +379,111 @@ public sealed class MainWindow : Window
         status.Text = "Редактор бібліотек закрито.";
     }
 
+    private async Task AddPage()
+    {
+        canvas.Cancel();
+        var next = session.Document.Pages.Max(page => page.Number) + 1;
+        var input = await ShowPageDialog(new PageDialogResult($"Аркуш {next}", PaperFormat.A3Landscape, true, 8, 6, new()));
+        if (input is null) return;
+        session.AddPage(input.Name, input.Format, input.ShowFrame, input.HorizontalZones, input.VerticalZones, input.TitleBlock);
+        canvas.Fit(); status.Text = $"Додано аркуш {session.ActivePage.Number}: {session.ActivePage.Name}.";
+    }
+
+    private async Task EditPage()
+    {
+        canvas.Cancel(); var page = session.ActivePage;
+        var input = await ShowPageDialog(new(page.Name, page.Format, page.ShowFrame, page.HorizontalZones, page.VerticalZones, page.TitleBlock));
+        if (input is null) return;
+        session.UpdatePage(page.Id, input.Name, input.Format, input.ShowFrame, input.HorizontalZones, input.VerticalZones, input.TitleBlock);
+        canvas.Fit(); status.Text = "Параметри аркуша оновлено.";
+    }
+
+    private void DeletePage()
+    {
+        try
+        {
+            var removed = session.ActivePage.Name; canvas.Cancel(); session.DeletePage(session.Document.ActivePageId); canvas.Fit();
+            status.Text = $"Аркуш «{removed}» видалено. Ctrl+Z відновить його.";
+        }
+        catch (InvalidDataException ex) { ReportError(ex, "Видалення аркуша"); }
+    }
+
+    private void CrossPageLink()
+    {
+        if (session.Selection.Count != 1)
+        {
+            status.Text = "Для міжсторінкового зв’язку виділи один елемент."; return;
+        }
+        var elementId = session.Selection.Single(); var pageId = session.Document.ActivePageId;
+        if (session.Document.CrossPageReferences.Any(reference =>
+            reference.FromPageId == pageId && reference.FromElementId == elementId ||
+            reference.ToPageId == pageId && reference.ToElementId == elementId))
+        {
+            session.RemoveCrossPageReferences(pageId, elementId); pendingPageLink = null;
+            status.Text = "Міжсторінковий зв’язок видалено. Ctrl+Z відновить його."; return;
+        }
+        if (pendingPageLink is not { } source)
+        {
+            pendingPageLink = (pageId, elementId);
+            status.Text = "Початок зв’язку вибрано. Перейди на інший аркуш, виділи цільовий елемент і натисни ⇄."; return;
+        }
+        if (source.PageId == pageId)
+        {
+            status.Text = "Ціль має бути на іншому аркуші. Початковий елемент збережено."; return;
+        }
+        try
+        {
+            session.AddCrossPageReference(source.PageId, source.ElementId, pageId, elementId);
+            pendingPageLink = null; status.Text = "Міжсторінковий зв’язок створено.";
+        }
+        catch (InvalidDataException ex) { ReportError(ex, "Міжсторінковий зв’язок"); }
+    }
+
+    private async Task<PageDialogResult?> ShowPageDialog(PageDialogResult value)
+    {
+        var dialog = new Window
+        {
+            Title = "Параметри аркуша", Width = 490, Height = 550, MinWidth = 420, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var panel = new StackPanel { Margin = new Thickness(20), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Назва" }); var name = new TextBox { Text = value.Name }; panel.Children.Add(name);
+        panel.Children.Add(new TextBlock { Text = "Формат" });
+        var formats = Enum.GetValues<PaperFormat>().Where(format => format != PaperFormat.Custom).ToArray();
+        var formatPicker = new ComboBox { ItemsSource = formats, SelectedItem = value.Format == PaperFormat.Custom ? PaperFormat.A3Landscape : value.Format };
+        formatPicker.ItemTemplate = new FuncDataTemplate<PaperFormat>((format, _) => new TextBlock { Text = FormatName(format) });
+        panel.Children.Add(formatPicker);
+        var frame = new CheckBox { Content = "Показувати рамку, зони та штамп", IsChecked = value.ShowFrame }; panel.Children.Add(frame);
+        var zones = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        zones.Children.Add(new TextBlock { Text = "Зони по горизонталі", VerticalAlignment = VerticalAlignment.Center });
+        var horizontal = new NumericUpDown { Minimum = 1, Maximum = 100, Value = value.HorizontalZones, Width = 75 }; zones.Children.Add(horizontal);
+        zones.Children.Add(new TextBlock { Text = "по вертикалі", VerticalAlignment = VerticalAlignment.Center });
+        var vertical = new NumericUpDown { Minimum = 1, Maximum = 100, Value = value.VerticalZones, Width = 75 }; zones.Children.Add(vertical);
+        panel.Children.Add(zones);
+        panel.Children.Add(new TextBlock { Text = "Штамп", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 5, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = "Проєкт" }); var project = new TextBox { Text = value.TitleBlock.Project }; panel.Children.Add(project);
+        panel.Children.Add(new TextBlock { Text = "Назва креслення" }); var drawing = new TextBox { Text = value.TitleBlock.Drawing }; panel.Children.Add(drawing);
+        var details = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var author = new TextBox { Text = value.TitleBlock.Author, PlaceholderText = "Автор", Width = 210 };
+        var revision = new TextBox { Text = value.TitleBlock.Revision, PlaceholderText = "Ревізія", Width = 180 };
+        details.Children.Add(author); details.Children.Add(revision); panel.Children.Add(details);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 8, 0, 0) };
+        AddButton(buttons, "Скасувати", () => dialog.Close(null));
+        AddButton(buttons, "Застосувати", () =>
+        {
+            if (string.IsNullOrWhiteSpace(name.Text) || formatPicker.SelectedItem is not PaperFormat format) return;
+            dialog.Close(new PageDialogResult(name.Text.Trim(), format, frame.IsChecked == true,
+                (int)(horizontal.Value ?? 8), (int)(vertical.Value ?? 6), new PageTitleBlock
+                {
+                    Project = project.Text?.Trim() ?? "", Drawing = drawing.Text?.Trim() ?? "",
+                    Author = author.Text?.Trim() ?? "", Revision = revision.Text?.Trim() ?? ""
+                }));
+        });
+        panel.Children.Add(buttons); dialog.Content = panel;
+        dialog.Opened += (_, _) => { name.Focus(); name.SelectAll(); };
+        return await dialog.ShowDialog<PageDialogResult?>(this);
+    }
+
     private async Task ShowElectricalIssues()
     {
         canvas.Cancel(); var issues = ElectricalRuleChecker.Check(session.Document.Elements);
@@ -409,3 +559,5 @@ public sealed class MainWindow : Window
 
 public sealed record TextDialogResult(string Text, double HeightMm);
 public sealed record CustomSymbolInput(string Name, string Prefix);
+public sealed record PageDialogResult(string Name, PaperFormat Format, bool ShowFrame,
+    int HorizontalZones, int VerticalZones, PageTitleBlock TitleBlock);

@@ -536,6 +536,7 @@ public sealed class DrawingCanvas : Decorator
         var doc = session.Document;
         var paper = new Rect(Screen(new(0, 0)), new Size(doc.WidthMm * scale, doc.HeightMm * scale));
         context.DrawRectangle(Brushes.White, new Pen(Brushes.SlateGray, 1), paper);
+        if (session.ActivePage.ShowFrame) DrawPageFrame(context, session.ActivePage);
         if (GridVisible)
         {
             // Thin the visible grid at low zoom; the snap step stays unchanged.
@@ -625,6 +626,48 @@ public sealed class DrawingCanvas : Decorator
         }
     }
 
+    private void DrawPageFrame(DrawingContext context, DrawingPage page)
+    {
+        const double margin = 10;
+        var framePen = new Pen(Brushes.Black, Math.Max(1, .3 * scale));
+        var topLeft = Screen(new(margin, margin));
+        var bottomRight = Screen(new(page.WidthMm - margin, page.HeightMm - margin));
+        context.DrawRectangle(null, framePen, new Rect(topLeft, bottomRight));
+
+        var zoneFont = Math.Max(6, 2.5 * scale);
+        for (var i = 0; i < page.HorizontalZones; i++)
+        {
+            var x = margin + (i + .5) * (page.WidthMm - 2 * margin) / page.HorizontalZones;
+            DrawPageText(context, ((char)('A' + i % 26)).ToString(), new(x, margin - 2), zoneFont, true);
+            DrawPageText(context, ((char)('A' + i % 26)).ToString(), new(x, page.HeightMm - margin + 4), zoneFont, true);
+        }
+        for (var i = 0; i < page.VerticalZones; i++)
+        {
+            var y = margin + (i + .5) * (page.HeightMm - 2 * margin) / page.VerticalZones;
+            DrawPageText(context, (i + 1).ToString(CultureInfo.InvariantCulture), new(margin - 3, y), zoneFont, true);
+            DrawPageText(context, (i + 1).ToString(CultureInfo.InvariantCulture), new(page.WidthMm - margin + 3, y), zoneFont, true);
+        }
+
+        var blockWidth = Math.Min(180, page.WidthMm - 2 * margin);
+        const double blockHeight = 40;
+        var x0 = page.WidthMm - margin - blockWidth; var y0 = page.HeightMm - margin - blockHeight;
+        context.DrawRectangle(Brushes.White, framePen, new Rect(Screen(new(x0, y0)), Screen(new(page.WidthMm - margin, page.HeightMm - margin))));
+        for (var row = 1; row < 4; row++)
+            context.DrawLine(framePen, Screen(new(x0, y0 + row * 10)), Screen(new(page.WidthMm - margin, y0 + row * 10)));
+        var title = page.TitleBlock;
+        DrawPageText(context, string.IsNullOrWhiteSpace(title.Project) ? "Проєкт" : title.Project, new(x0 + 2, y0 + 7), Math.Max(7, 2.7 * scale));
+        DrawPageText(context, string.IsNullOrWhiteSpace(title.Drawing) ? page.Name : title.Drawing, new(x0 + 2, y0 + 17), Math.Max(7, 2.7 * scale));
+        DrawPageText(context, $"Автор: {title.Author}    Рев.: {title.Revision}", new(x0 + 2, y0 + 27), Math.Max(7, 2.5 * scale));
+        DrawPageText(context, $"Аркуш {page.Number} · {page.WidthMm:0.#}×{page.HeightMm:0.#} мм", new(x0 + 2, y0 + 37), Math.Max(7, 2.5 * scale));
+    }
+
+    private void DrawPageText(DrawingContext context, string value, PointMm point, double fontSize, bool centered = false)
+    {
+        var text = new FormattedText(value, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, fontSize, Brushes.Black);
+        var at = Screen(point);
+        context.DrawText(text, new Point(centered ? at.X - text.Width / 2 : at.X, at.Y - text.Height));
+    }
+
     private static void DrawLiveGeometryValues(DrawingContext context, Point at, ElementKind kind, PointMm delta)
     {
         var value = kind switch
@@ -698,6 +741,26 @@ public sealed class DrawingCanvas : Decorator
         if (session.Selection.Contains(e.Id))
             foreach (var p in AssociativeDimensions.Vertices(e).DefaultIfEmpty(e.A).Distinct().Select(Screen))
                 ctx.DrawRectangle(Brushes.White, new Pen(brush, 1), new Rect(p.X - 3, p.Y - 3, 6, 6));
+        DrawCrossPageMarker(ctx, e);
+    }
+
+    private void DrawCrossPageMarker(DrawingContext context, DrawingElement element)
+    {
+        var currentPage = session.Document.ActivePageId;
+        var reference = session.Document.CrossPageReferences.FirstOrDefault(item =>
+            item.FromPageId == currentPage && item.FromElementId == element.Id ||
+            item.ToPageId == currentPage && item.ToElementId == element.Id);
+        if (reference is null) return;
+        var outgoing = reference.FromPageId == currentPage;
+        var otherPageId = outgoing ? reference.ToPageId : reference.FromPageId;
+        var other = session.Document.Pages.FirstOrDefault(page => page.Id == otherPageId);
+        if (other is null) return;
+        var value = reference.Label ?? $"{(outgoing ? "→" : "←")}{other.Number}";
+        var text = new FormattedText(value, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            Typeface.Default, Math.Max(8, 3 * scale), Brushes.RoyalBlue);
+        var at = Screen(element.B + new PointMm(2, -2));
+        context.DrawRectangle(Brushes.White, null, new Rect(at.X - 2, at.Y - text.Height, text.Width + 4, text.Height + 2));
+        context.DrawText(text, new Point(at.X, at.Y - text.Height));
     }
 
     private static IBrush ElementBrush(ElementKind kind) => kind switch

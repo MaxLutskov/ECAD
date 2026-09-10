@@ -1,4 +1,4 @@
-param([string]$Version = '0.15')
+﻿param([string]$Version = '0.16')
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)

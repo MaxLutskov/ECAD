@@ -105,16 +105,51 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 10;
+    public int SchemaVersion { get; init; } = 11;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
+    public Guid ActivePageId { get; init; }
+    public DrawingPage[] Pages { get; init; } = [];
+    public CrossPageReference[] CrossPageReferences { get; init; } = [];
     public SymbolDefinition[] CustomSymbols { get; init; } = [];
     public ComponentLibrary[] ComponentLibraries { get; init; } = [];
 
     public void Validate()
     {
-        if (SchemaVersion is < 1 or > 10) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > 11) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (Pages is null || Pages.Length > 100 || CrossPageReferences is null || CrossPageReferences.Length > 10000)
+            throw new InvalidDataException("Некоректна структура сторінок.");
+        if (Pages.Length > 0)
+        {
+            if (Pages.Select(page => page.Id).Distinct().Count() != Pages.Length ||
+                Pages.Select(page => page.Number).Distinct().Count() != Pages.Length ||
+                Pages.Any(page => page.Id == Guid.Empty || page.Number < 1 || string.IsNullOrWhiteSpace(page.Name) || page.Name.Length > 100 ||
+                    !Enum.IsDefined(page.Format) || !double.IsFinite(page.WidthMm) || !double.IsFinite(page.HeightMm) ||
+                    page.WidthMm <= 0 || page.HeightMm <= 0 || page.WidthMm > 10000 || page.HeightMm > 10000 ||
+                    page.HorizontalZones is < 1 or > 100 || page.VerticalZones is < 1 or > 100 ||
+                    page.TitleBlock is null || page.TitleBlock.Project is null or { Length: > 200 } ||
+                    page.TitleBlock.Drawing is null or { Length: > 200 } || page.TitleBlock.Author is null or { Length: > 100 } ||
+                    page.TitleBlock.Revision is null or { Length: > 50 } || page.Elements is null) ||
+                Pages.All(page => page.Id != ActivePageId))
+                throw new InvalidDataException("Некоректні дані сторінки.");
+            var active = Pages.Single(page => page.Id == ActivePageId);
+            if (active.WidthMm != WidthMm || active.HeightMm != HeightMm || !active.Elements.SequenceEqual(Elements))
+                throw new InvalidDataException("Активна сторінка не синхронізована.");
+            foreach (var page in Pages.Where(page => page.Id != ActivePageId))
+                (this with { Pages = [], CrossPageReferences = [], ActivePageId = Guid.Empty,
+                    WidthMm = page.WidthMm, HeightMm = page.HeightMm, Elements = page.Elements }).Validate();
+            var allElements = Pages.SelectMany(page => page.Elements.Select(element => (page.Id, Element: element))).ToArray();
+            if (allElements.Select(item => item.Element.Id).Distinct().Count() != allElements.Length)
+                throw new InvalidDataException("ID елементів мають бути унікальними в усьому проєкті.");
+            var pageElements = Pages.ToDictionary(page => page.Id, page => page.Elements.Select(element => element.Id).ToHashSet());
+            if (CrossPageReferences.Select(reference => reference.Id).Distinct().Count() != CrossPageReferences.Length ||
+                CrossPageReferences.Any(reference => reference.Id == Guid.Empty || reference.FromPageId == reference.ToPageId ||
+                    !pageElements.TryGetValue(reference.FromPageId, out var from) || !from.Contains(reference.FromElementId) ||
+                    !pageElements.TryGetValue(reference.ToPageId, out var to) || !to.Contains(reference.ToElementId) ||
+                    reference.Label is { Length: > 100 }))
+                throw new InvalidDataException("Некоректне міжсторінкове посилання.");
+        }
         if (!double.IsFinite(WidthMm) || !double.IsFinite(HeightMm) || WidthMm <= 0 || HeightMm <= 0 ||
             WidthMm > 10000 || HeightMm > 10000)
             throw new InvalidDataException("Некоректний розмір аркуша.");
