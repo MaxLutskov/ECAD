@@ -1159,4 +1159,20 @@ Check("Main window renders with Ukrainian controls", () =>
     frame.Save(Path.Combine(output, "main-window.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
     main.Close();
 });
+Check("Page settings show readable horizontal and vertical zone values", () =>
+{
+    var main = new MainWindow(); main.Show(); Dispatcher.UIThread.RunJobs();
+    var edit = main.GetVisualDescendants().OfType<Button>()
+        .Single(button => Equals(ToolTip.GetTip(button), "Параметри аркуша"));
+    edit.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)); Dispatcher.UIThread.RunJobs();
+    var dialog = main.OwnedWindows.Single(window => window.Title == "Параметри аркуша");
+    var horizontal = dialog.GetVisualDescendants().OfType<NumericUpDown>().Single(control => control.Name == "HorizontalZones");
+    var vertical = dialog.GetVisualDescendants().OfType<NumericUpDown>().Single(control => control.Name == "VerticalZones");
+    Assert(horizontal.Value == 8 && vertical.Value == 6 && horizontal.Width >= 120 && vertical.Width >= 120);
+    using (var frame = dialog.CaptureRenderedFrame() ?? throw new Exception("No rendered page settings"))
+        frame.Save(Path.Combine(output, "page-settings.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+    dialog.Close(null); Dispatcher.UIThread.RunJobs();
+    typeof(MainWindow).GetField("allowClose", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(main, true);
+    main.Close();
+});
 Console.WriteLine($"{passed} checks passed. Rendered previews: {output}");

@@ -454,12 +454,27 @@ public sealed class MainWindow : Window
         formatPicker.ItemTemplate = new FuncDataTemplate<PaperFormat>((format, _) => new TextBlock { Text = FormatName(format) });
         panel.Children.Add(formatPicker);
         var frame = new CheckBox { Content = "Показувати рамку, зони та штамп", IsChecked = value.ShowFrame }; panel.Children.Add(frame);
-        var zones = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        zones.Children.Add(new TextBlock { Text = "Зони по горизонталі", VerticalAlignment = VerticalAlignment.Center });
-        var horizontal = new NumericUpDown { Minimum = 1, Maximum = 100, Value = value.HorizontalZones, Width = 75 }; zones.Children.Add(horizontal);
-        zones.Children.Add(new TextBlock { Text = "по вертикалі", VerticalAlignment = VerticalAlignment.Center });
-        var vertical = new NumericUpDown { Minimum = 1, Maximum = 100, Value = value.VerticalZones, Width = 75 }; zones.Children.Add(vertical);
-        panel.Children.Add(zones);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Зони ділять рамку для пошуку місця на кресленні, наприклад C4. Горизонталь позначається літерами, вертикаль — числами.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray
+        });
+        var horizontalRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        horizontalRow.Children.Add(new TextBlock { Text = "Горизонтальні зони (A, B, C…)", Width = 245, VerticalAlignment = VerticalAlignment.Center });
+        var horizontal = new NumericUpDown
+        {
+            Name = "HorizontalZones", Minimum = 1, Maximum = 100, Increment = 1,
+            Value = value.HorizontalZones, Width = 130, HorizontalContentAlignment = HorizontalAlignment.Left
+        };
+        horizontalRow.Children.Add(horizontal); panel.Children.Add(horizontalRow);
+        var verticalRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        verticalRow.Children.Add(new TextBlock { Text = "Вертикальні зони (1, 2, 3…)", Width = 245, VerticalAlignment = VerticalAlignment.Center });
+        var vertical = new NumericUpDown
+        {
+            Name = "VerticalZones", Minimum = 1, Maximum = 100, Increment = 1,
+            Value = value.VerticalZones, Width = 130, HorizontalContentAlignment = HorizontalAlignment.Left
+        };
+        verticalRow.Children.Add(vertical); panel.Children.Add(verticalRow);
         panel.Children.Add(new TextBlock { Text = "Штамп", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 5, 0, 0) });
         panel.Children.Add(new TextBlock { Text = "Проєкт" }); var project = new TextBox { Text = value.TitleBlock.Project }; panel.Children.Add(project);
         panel.Children.Add(new TextBlock { Text = "Назва креслення" }); var drawing = new TextBox { Text = value.TitleBlock.Drawing }; panel.Children.Add(drawing);
