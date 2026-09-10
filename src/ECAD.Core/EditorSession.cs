@@ -73,6 +73,13 @@ public sealed class EditorSession
         ApplyDocument(Document with { ComponentLibraries = [.. Document.ComponentLibraries, library] });
     }
 
+    public void ImportComponentLibraries(IEnumerable<ComponentLibrary> libraries)
+    {
+        var additions = libraries?.ToArray() ?? throw new InvalidDataException("Порожній набір бібліотек.");
+        if (additions.Length == 0) throw new InvalidDataException("Порожній набір бібліотек.");
+        ApplyDocument(Document with { ComponentLibraries = [.. Document.ComponentLibraries, .. additions] });
+    }
+
     public void UpdateComponentLibrary(ComponentLibrary library)
     {
         if (library is null) throw new InvalidDataException("Порожня бібліотека.");

@@ -1,0 +1,979 @@
+{
+  "SchemaVersion": 1,
+  "Library": {
+    "Id": "00000000-0000-0000-0000-000000002001",
+    "Name": "Приводи та двигуни (демо)",
+    "Description": "Приклад бібліотеки з перетворювачами частоти, двигунами й ANSI-реле. Дані демонстраційні.",
+    "Version": 1,
+    "DeviceTypes": [
+      {
+        "Id": "00000000-0000-0000-0000-000000002101",
+        "Name": "Перетворювач частоти",
+        "Description": "Варіанти за живленням, потужністю та інтерфейсом керування",
+        "ConfigurationFields": [
+          {
+            "Key": "supply",
+            "Name": "Живлення",
+            "Required": true,
+            "AllowedValues": [
+              "1~ 230 V",
+              "3~ 400 V"
+            ],
+            "Unit": null
+          },
+          {
+            "Key": "power",
+            "Name": "Потужність",
+            "Required": true,
+            "AllowedValues": null,
+            "Unit": "kW"
+          },
+          {
+            "Key": "control",
+            "Name": "Інтерфейс керування",
+            "Required": true,
+            "AllowedValues": null,
+            "Unit": null
+          }
+        ],
+        "Families": [
+          {
+            "Id": "00000000-0000-0000-0000-000000002201",
+            "Name": "SINAMICS V20 (демо)",
+            "Manufacturer": "Siemens (демо)",
+            "Series": "V20",
+            "SharedParameters": [
+              {
+                "Key": "protection",
+                "Name": "Ступінь захисту",
+                "Value": "IP20",
+                "Unit": null
+              },
+              {
+                "Key": "mounting",
+                "Name": "Типовий монтаж",
+                "Value": "Монтажна панель",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000002301",
+                "Name": "V20 1.5 kW",
+                "CatalogNumber": "DEMO-V20-15",
+                "RatingText": "1.5 kW · 1~ 230 V",
+                "SymbolKey": "IEC_VFD",
+                "Configuration": [
+                  {
+                    "Key": "supply",
+                    "Value": "1~ 230 V"
+                  },
+                  {
+                    "Key": "power",
+                    "Value": "1.5"
+                  },
+                  {
+                    "Key": "control",
+                    "Value": "Клеми + Modbus RTU"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "output-power",
+                    "Name": "Потужність двигуна",
+                    "Value": "1.5",
+                    "Unit": "kW"
+                  },
+                  {
+                    "Key": "output-frequency",
+                    "Name": "Вихідна частота",
+                    "Value": "0–550",
+                    "Unit": "Hz"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "L1",
+                    "Designation": "L1",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "L2",
+                    "Designation": "L2",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "L3",
+                    "Designation": "L3",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "U",
+                    "Designation": "U",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "V",
+                    "Designation": "V",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "W",
+                    "Designation": "W",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002401",
+                    "Name": "Настінне виконання",
+                    "WidthMm": 90,
+                    "HeightMm": 150,
+                    "DepthMm": 145,
+                    "Mounting": "Монтажна панель",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 90,
+                          "Y": 0,
+                          "Length": 90,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 90,
+                          "Y": 0,
+                          "Length": 90,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 90,
+                          "Y": 150,
+                          "Length": 174.92855684535903,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 90,
+                          "Y": 150,
+                          "Length": 174.92855684535903,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 150,
+                          "Length": 150,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 150,
+                          "Length": 150,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002411",
+                    "Name": "Виконання з боковим фільтром",
+                    "WidthMm": 125,
+                    "HeightMm": 150,
+                    "DepthMm": 160,
+                    "Mounting": "Монтажна панель",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 125,
+                          "Y": 0,
+                          "Length": 125,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 125,
+                          "Y": 0,
+                          "Length": 125,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 125,
+                          "Y": 150,
+                          "Length": 195.25624189766637,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 125,
+                          "Y": 150,
+                          "Length": 195.25624189766637,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 150,
+                          "Length": 150,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 150,
+                          "Length": 150,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Id": "00000000-0000-0000-0000-000000002302",
+                "Name": "V20 7.5 kW",
+                "CatalogNumber": "DEMO-V20-75",
+                "RatingText": "7.5 kW · 3~ 400 V",
+                "SymbolKey": "IEC_VFD",
+                "Configuration": [
+                  {
+                    "Key": "supply",
+                    "Value": "3~ 400 V"
+                  },
+                  {
+                    "Key": "power",
+                    "Value": "7.5"
+                  },
+                  {
+                    "Key": "control",
+                    "Value": "Клеми + USS"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "output-power",
+                    "Name": "Потужність двигуна",
+                    "Value": "7.5",
+                    "Unit": "kW"
+                  },
+                  {
+                    "Key": "output-frequency",
+                    "Name": "Вихідна частота",
+                    "Value": "0–550",
+                    "Unit": "Hz"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "L1",
+                    "Designation": "L1",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "L2",
+                    "Designation": "L2",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "L3",
+                    "Designation": "L3",
+                    "Function": "Вхід живлення",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "U",
+                    "Designation": "U",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "V",
+                    "Designation": "V",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "W",
+                    "Designation": "W",
+                    "Function": "Вихід двигуна",
+                    "ElectricalType": "Power"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002402",
+                    "Name": "Настінне виконання",
+                    "WidthMm": 140,
+                    "HeightMm": 220,
+                    "DepthMm": 180,
+                    "Mounting": "Монтажна панель",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 140,
+                          "Y": 0,
+                          "Length": 140,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 140,
+                          "Y": 0,
+                          "Length": 140,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 140,
+                          "Y": 220,
+                          "Length": 260.76809620810593,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 140,
+                          "Y": 220,
+                          "Length": 260.76809620810593,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 220,
+                          "Length": 220,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 220,
+                          "Length": 220,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002412",
+                    "Name": "Виконання з боковим фільтром",
+                    "WidthMm": 175,
+                    "HeightMm": 220,
+                    "DepthMm": 195,
+                    "Mounting": "Монтажна панель",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 175,
+                          "Y": 0,
+                          "Length": 175,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 175,
+                          "Y": 0,
+                          "Length": 175,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 175,
+                          "Y": 220,
+                          "Length": 281.1138559374119,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 175,
+                          "Y": 220,
+                          "Length": 281.1138559374119,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 220,
+                          "Length": 220,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 220,
+                          "Length": 220,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Id": "00000000-0000-0000-0000-000000002501",
+        "Name": "Асинхронний двигун",
+        "Description": "Трифазні двигуни з довільним механічним виконанням",
+        "ConfigurationFields": [
+          {
+            "Key": "poles",
+            "Name": "Кількість полюсів",
+            "Required": true,
+            "AllowedValues": null,
+            "Unit": null
+          },
+          {
+            "Key": "mounting-form",
+            "Name": "Монтажне виконання",
+            "Required": true,
+            "AllowedValues": [
+              "IM B3",
+              "IM B5",
+              "IM B35"
+            ],
+            "Unit": null
+          },
+          {
+            "Key": "cooling",
+            "Name": "Охолодження",
+            "Required": false,
+            "AllowedValues": null,
+            "Unit": null
+          }
+        ],
+        "Families": [
+          {
+            "Id": "00000000-0000-0000-0000-000000002601",
+            "Name": "M3BP (демо)",
+            "Manufacturer": "ABB (демо)",
+            "Series": "M3BP",
+            "SharedParameters": [
+              {
+                "Key": "efficiency-class",
+                "Name": "Клас ефективності",
+                "Value": "IE3",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000002701",
+                "Name": "M3BP 132S 4",
+                "CatalogNumber": "DEMO-M3BP-132S4",
+                "RatingText": "5.5 kW · 400/690 V · 4 полюси",
+                "SymbolKey": "IEC_MOTOR_3P",
+                "Configuration": [
+                  {
+                    "Key": "poles",
+                    "Value": "4"
+                  },
+                  {
+                    "Key": "mounting-form",
+                    "Value": "IM B3"
+                  },
+                  {
+                    "Key": "cooling",
+                    "Value": "IC411"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "power",
+                    "Name": "Номінальна потужність",
+                    "Value": "5.5",
+                    "Unit": "kW"
+                  },
+                  {
+                    "Key": "speed",
+                    "Name": "Швидкість",
+                    "Value": "1470",
+                    "Unit": "rpm"
+                  },
+                  {
+                    "Key": "mass",
+                    "Name": "Маса",
+                    "Value": "55",
+                    "Unit": "kg"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "U1",
+                    "Designation": "U1",
+                    "Function": "Фаза U",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "V1",
+                    "Designation": "V1",
+                    "Function": "Фаза V",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "W1",
+                    "Designation": "W1",
+                    "Function": "Фаза W",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "PE",
+                    "Designation": "PE",
+                    "Function": "Захисне заземлення",
+                    "ElectricalType": "ProtectiveEarth"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002801",
+                    "Name": "Лапи IM B3",
+                    "WidthMm": 350,
+                    "HeightMm": 260,
+                    "DepthMm": 520,
+                    "Mounting": "Монтажна плита",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 350,
+                          "Y": 0,
+                          "Length": 350,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 350,
+                          "Y": 0,
+                          "Length": 350,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 350,
+                          "Y": 260,
+                          "Length": 436.0045871318328,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 350,
+                          "Y": 260,
+                          "Length": 436.0045871318328,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 260,
+                          "Length": 260,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 260,
+                          "Length": 260,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002802",
+                    "Name": "Фланець IM B5",
+                    "WidthMm": 360,
+                    "HeightMm": 360,
+                    "DepthMm": 500,
+                    "Mounting": "Фланець",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 360,
+                          "Y": 0,
+                          "Length": 360,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 360,
+                          "Y": 0,
+                          "Length": 360,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 360,
+                          "Y": 360,
+                          "Length": 509.11688245431424,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 360,
+                          "Y": 360,
+                          "Length": 509.11688245431424,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 360,
+                          "Length": 360,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 360,
+                          "Length": 360,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Id": "00000000-0000-0000-0000-000000002901",
+        "Name": "Керувальне реле ANSI",
+        "Description": "Приклад того, що стандарт символу не визначає структуру каталогу",
+        "ConfigurationFields": [
+          {
+            "Key": "coil-voltage",
+            "Name": "Напруга котушки",
+            "Required": true,
+            "AllowedValues": null,
+            "Unit": null
+          },
+          {
+            "Key": "contact-form",
+            "Name": "Контактна схема",
+            "Required": true,
+            "AllowedValues": [
+              "1NO",
+              "1NC",
+              "2NO+2NC"
+            ],
+            "Unit": null
+          }
+        ],
+        "Families": [
+          {
+            "Id": "00000000-0000-0000-0000-000000002911",
+            "Name": "CR demo",
+            "Manufacturer": "Example Controls",
+            "Series": "CR",
+            "SharedParameters": [
+              {
+                "Key": "standard-profile",
+                "Name": "Профіль символу",
+                "Value": "ANSI draft",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000002921",
+                "Name": "CR24 2NO+2NC",
+                "CatalogNumber": "DEMO-CR24",
+                "RatingText": "24 V DC · 2NO+2NC",
+                "SymbolKey": "ANSI_COIL",
+                "Configuration": [
+                  {
+                    "Key": "coil-voltage",
+                    "Value": "24 V DC"
+                  },
+                  {
+                    "Key": "contact-form",
+                    "Value": "2NO+2NC"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "coil-power",
+                    "Name": "Споживання котушки",
+                    "Value": "0.9",
+                    "Unit": "W"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "A1",
+                    "Designation": "A1",
+                    "Function": "Котушка +",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "A2",
+                    "Designation": "A2",
+                    "Function": "Котушка -",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "13",
+                    "Designation": "13",
+                    "Function": "NO 1 common",
+                    "ElectricalType": "Control"
+                  },
+                  {
+                    "Id": "14",
+                    "Designation": "14",
+                    "Function": "NO 1 switched",
+                    "ElectricalType": "Control"
+                  },
+                  {
+                    "Id": "21",
+                    "Designation": "21",
+                    "Function": "NC 1 common",
+                    "ElectricalType": "Control"
+                  },
+                  {
+                    "Id": "22",
+                    "Designation": "22",
+                    "Function": "NC 1 switched",
+                    "ElectricalType": "Control"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002931",
+                    "Name": "Реле з розеткою",
+                    "WidthMm": 15.8,
+                    "HeightMm": 78,
+                    "DepthMm": 72,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 1,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Id": "00000000-0000-0000-0000-000000002932",
+                    "Name": "Реле без розетки",
+                    "WidthMm": 13,
+                    "HeightMm": 29,
+                    "DepthMm": 35,
+                    "Mounting": "PCB",
+                    "DinModules": null,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 13,
+                          "Y": 0,
+                          "Length": 13,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 13,
+                          "Y": 0,
+                          "Length": 13,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 13,
+                          "Y": 29,
+                          "Length": 31.78049716414141,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 13,
+                          "Y": 29,
+                          "Length": 31.78049716414141,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 29,
+                          "Length": 29,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 29,
+                          "Length": 29,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -384,6 +384,25 @@ Check("Catalog libraries copy and round-trip through ecadlib files", () =>
     var imported = new EditorSession(); imported.ImportComponentLibrary(reopened);
     Assert(imported.Document.ComponentLibraries.Single().Id == copy.Id); imported.Undo(); Assert(imported.Document.ComponentLibraries.Length == 0);
 });
+Check("Example libraries exercise universal configurations, contacts and physical outlines", () =>
+{
+    var examples = ExampleComponentLibraries.Create();
+    Assert(examples.Length == 2 && examples.Sum(item => item.DeviceTypes.Length) == 5);
+    var document = new DrawingDocument { ComponentLibraries = examples }; document.Validate();
+    var all = ComponentCatalog.Variants(document);
+    Assert(all.Length == 9 && all.Sum(item => item.Variant.PhysicalRepresentations.Length) == 14);
+    Assert(all.Any(item => item.Variant.Configuration.Any(value => value.Key == "poles" && value.Value == "4P")));
+    Assert(all.Any(item => item.Variant.Configuration.Any(value => value.Key == "power" && value.Value == "7.5")));
+    Assert(all.All(item => item.Variant.Contacts.Length >= 2));
+    Assert(all.SelectMany(item => item.Variant.PhysicalRepresentations).All(item => item.Outline?.Length == 4));
+    foreach (var file in new[] { "iec-automation-demo.ecadlib", "drives-and-motors-demo.ecadlib" })
+    {
+        var imported = ComponentLibraryFile.Open(Path.GetFullPath(Path.Combine("examples", "libraries", file)), SymbolLibrary.All.Select(item => item.Key));
+        Assert(examples.Any(item => item.Id == imported.Id && item.Name == imported.Name));
+    }
+    var s = new EditorSession(); s.ImportComponentLibraries(examples); Assert(s.Document.ComponentLibraries.Length == 2);
+    s.Undo(); Assert(s.Document.ComponentLibraries.Length == 0);
+});
 
 AppBuilder.Configure<App>().UseSkia().WithInterFont()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
@@ -1061,6 +1080,14 @@ Check("Library editor creates every hierarchy level and searches variants", () =
         frame.Save(Path.Combine(output, "library-editor.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
     NamedButton("CopyLibrary").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
     Assert(catalogSession.Document.ComponentLibraries.Length == 2);
+    search.Text = ""; Dispatcher.UIThread.RunJobs();
+    NamedButton("AddExampleLibraries").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Assert(catalogSession.Document.ComponentLibraries.Length == 4);
+    search.Text = "SINAMICS"; Dispatcher.UIThread.RunJobs();
+    Assert(dialog.GetVisualDescendants().OfType<ListBox>().Single(item => item.Name == "LibraryList").ItemCount == 1);
+    Assert(dialog.GetVisualDescendants().OfType<ListBox>().Single(item => item.Name == "DeviceVariantList").ItemCount == 2);
+    using (var frame = dialog.CaptureRenderedFrame() ?? throw new Exception("No rendered example library"))
+        frame.Save(Path.Combine(output, "library-examples.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
     dialog.Close();
 });
 liveWindow.Close();

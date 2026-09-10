@@ -28,12 +28,13 @@ public sealed class LibraryEditorWindow : Window
         Title = "Бібліотеки пристроїв"; Width = 1220; Height = 820; MinWidth = 900; MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var root = new DockPanel { Margin = new Thickness(12) };
-        var top = new Grid { ColumnDefinitions = new("*,Auto,Auto,Auto,Auto"), ColumnSpacing = 7 };
+        var top = new Grid { ColumnDefinitions = new("*,Auto,Auto,Auto,Auto,Auto"), ColumnSpacing = 7 };
         top.Children.Add(search);
         var add = Button("Нова бібліотека", NewLibrary, "NewLibrary"); Grid.SetColumn(add, 1); top.Children.Add(add);
         var copy = Button("Копіювати", CopyLibrary, "CopyLibrary"); Grid.SetColumn(copy, 2); top.Children.Add(copy);
         var import = AsyncButton("Імпорт…", ImportLibrary, "ImportLibrary"); Grid.SetColumn(import, 3); top.Children.Add(import);
         var export = AsyncButton("Експорт…", ExportLibrary, "ExportLibrary"); Grid.SetColumn(export, 4); top.Children.Add(export);
+        var examples = Button("Додати приклади", AddExamples, "AddExampleLibraries"); Grid.SetColumn(examples, 5); top.Children.Add(examples);
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
 
         var browser = new Grid
@@ -109,20 +110,23 @@ public sealed class LibraryEditorWindow : Window
             libraries.SelectedItem = libraries.ItemsSource.Cast<CatalogChoice>().FirstOrDefault(item => item.Id == libraryId);
 
             var library = CurrentLibrary();
-            var visibleTypes = library?.DeviceTypes.Where(type => Matches(type, query)).ToArray() ?? [];
+            var libraryMatch = library is not null && OwnMatches(library, query);
+            var visibleTypes = library?.DeviceTypes.Where(type => libraryMatch || Matches(type, query)).ToArray() ?? [];
             typeId = KeepOrFirst(visibleTypes.Select(item => item.Id), typeId);
             types.ItemsSource = visibleTypes.Select(item => new CatalogChoice(item.Id, item.Name)).ToArray();
             types.SelectedItem = types.ItemsSource.Cast<CatalogChoice>().FirstOrDefault(item => item.Id == typeId);
 
             var type = CurrentType();
-            var visibleFamilies = type?.Families.Where(family => Matches(family, query)).ToArray() ?? [];
+            var typeMatch = libraryMatch || type is not null && OwnMatches(type, query);
+            var visibleFamilies = type?.Families.Where(family => typeMatch || Matches(family, query)).ToArray() ?? [];
             familyId = KeepOrFirst(visibleFamilies.Select(item => item.Id), familyId);
             families.ItemsSource = visibleFamilies.Select(item => new CatalogChoice(item.Id,
                 $"{item.Manufacturer ?? "—"} · {item.Series ?? item.Name}")).ToArray();
             families.SelectedItem = families.ItemsSource.Cast<CatalogChoice>().FirstOrDefault(item => item.Id == familyId);
 
             var family = CurrentFamily();
-            var visibleVariants = family?.Variants.Where(variant => Matches(variant, query)).ToArray() ?? [];
+            var familyMatch = typeMatch || family is not null && OwnMatches(family, query);
+            var visibleVariants = family?.Variants.Where(variant => familyMatch || Matches(variant, query)).ToArray() ?? [];
             variantId = KeepOrFirst(visibleVariants.Select(item => item.Id), variantId);
             variants.ItemsSource = visibleVariants.Select(item => new CatalogChoice(item.Id,
                 $"{item.Name} · {item.CatalogNumber ?? "без артикулу"}")).ToArray();
@@ -219,6 +223,13 @@ public sealed class LibraryEditorWindow : Window
     {
         var library = CurrentLibrary() ?? throw new InvalidDataException("Обери бібліотеку.");
         var copy = session.DuplicateComponentLibrary(library.Id); libraryId = copy.Id; typeId = familyId = variantId = null; editLevel = 0;
+    });
+    private void AddExamples() => Run(() =>
+    {
+        var examples = ExampleComponentLibraries.Create().Where(example => !session.Document.ComponentLibraries.Any(existing =>
+            existing.Id == example.Id || string.Equals(existing.Name, example.Name, StringComparison.OrdinalIgnoreCase))).ToArray();
+        if (examples.Length == 0) throw new InvalidDataException("Демонстраційні бібліотеки вже додано.");
+        session.ImportComponentLibraries(examples); libraryId = examples[0].Id; typeId = familyId = variantId = null; editLevel = 0;
     });
     private void NewType() => Run(() =>
     {
@@ -342,14 +353,17 @@ public sealed class LibraryEditorWindow : Window
         var values = ids.ToArray(); return selected is { } id && values.Contains(id) ? id : values.Cast<Guid?>().FirstOrDefault();
     }
 
-    private static bool Matches(ComponentLibrary item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Description, q) || item.DeviceTypes.Any(type => Matches(type, q));
-    private static bool Matches(DeviceTypeDefinition item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Description, q) ||
-        item.ConfigurationFields.Any(field => Contains(field.Key, q) || Contains(field.Name, q) || field.AllowedValues?.Any(value => Contains(value, q)) == true) || item.Families.Any(family => Matches(family, q));
-    private static bool Matches(DeviceFamily item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Manufacturer, q) || Contains(item.Series, q) ||
-        item.SharedParameters.Any(parameter => Contains(parameter.Name, q) || Contains(parameter.Value, q)) || item.Variants.Any(variant => Matches(variant, q));
+    private static bool Matches(ComponentLibrary item, string q) => OwnMatches(item, q) || item.DeviceTypes.Any(type => Matches(type, q));
+    private static bool Matches(DeviceTypeDefinition item, string q) => OwnMatches(item, q) || item.Families.Any(family => Matches(family, q));
+    private static bool Matches(DeviceFamily item, string q) => OwnMatches(item, q) || item.Variants.Any(variant => Matches(variant, q));
     private static bool Matches(DeviceVariant item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.CatalogNumber, q) || Contains(item.RatingText, q) ||
         item.Configuration.Any(value => Contains(value.Value, q)) || item.Parameters.Any(parameter => Contains(parameter.Name, q) || Contains(parameter.Value, q)) ||
         item.Contacts.Any(contact => Contains(contact.Designation, q) || Contains(contact.Function, q)) || item.PhysicalRepresentations.Any(physical => Contains(physical.Name, q));
+    private static bool OwnMatches(ComponentLibrary item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Description, q);
+    private static bool OwnMatches(DeviceTypeDefinition item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Description, q) ||
+        item.ConfigurationFields.Any(field => Contains(field.Key, q) || Contains(field.Name, q) || field.AllowedValues?.Any(value => Contains(value, q)) == true);
+    private static bool OwnMatches(DeviceFamily item, string q) => Empty(q) || Contains(item.Name, q) || Contains(item.Manufacturer, q) || Contains(item.Series, q) ||
+        item.SharedParameters.Any(parameter => Contains(parameter.Name, q) || Contains(parameter.Value, q));
     private static bool Empty(string q) => q.Length == 0;
     private static bool Contains(string? value, string q) => value?.Contains(q, StringComparison.CurrentCultureIgnoreCase) == true;
 

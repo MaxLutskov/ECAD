@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace ECAD.Core;
@@ -5,7 +6,10 @@ namespace ECAD.Core;
 public static class ComponentLibraryFile
 {
     private sealed record Envelope(int SchemaVersion, ComponentLibrary Library);
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public static void Save(string path, ComponentLibrary library)
     {

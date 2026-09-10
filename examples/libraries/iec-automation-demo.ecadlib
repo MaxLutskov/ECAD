@@ -1,0 +1,888 @@
+{
+  "SchemaVersion": 1,
+  "Library": {
+    "Id": "00000000-0000-0000-0000-000000001001",
+    "Name": "IEC — автоматика (демо)",
+    "Description": "Навчальна бібліотека для демонстрації моделі ECAD. Номінали й артикули позначені як DEMO та потребують звірки з каталогом виробника.",
+    "Version": 1,
+    "DeviceTypes": [
+      {
+        "Id": "00000000-0000-0000-0000-000000001101",
+        "Name": "Автоматичний вимикач",
+        "Description": "Модульні автоматичні вимикачі з довільною кількістю полюсів",
+        "ConfigurationFields": [
+          {
+            "Key": "poles",
+            "Name": "Кількість полюсів",
+            "Required": true,
+            "AllowedValues": [
+              "1P",
+              "2P",
+              "3P",
+              "4P"
+            ],
+            "Unit": null
+          },
+          {
+            "Key": "trip-curve",
+            "Name": "Характеристика",
+            "Required": true,
+            "AllowedValues": [
+              "B",
+              "C",
+              "D"
+            ],
+            "Unit": null
+          },
+          {
+            "Key": "execution",
+            "Name": "Виконання",
+            "Required": false,
+            "AllowedValues": null,
+            "Unit": null
+          }
+        ],
+        "Families": [
+          {
+            "Id": "00000000-0000-0000-0000-000000001201",
+            "Name": "System pro M compact",
+            "Manufacturer": "ABB (демо)",
+            "Series": "S200",
+            "SharedParameters": [
+              {
+                "Key": "standard",
+                "Name": "Нормативний профіль",
+                "Value": "IEC 60898-1 (приклад)",
+                "Unit": null
+              },
+              {
+                "Key": "mounting",
+                "Name": "Типовий монтаж",
+                "Value": "DIN-рейка",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000001301",
+                "Name": "S201 C16",
+                "CatalogNumber": "DEMO-ABB-S201-C16",
+                "RatingText": "C16 · 230 V · 6 kA",
+                "SymbolKey": "IEC_BREAKER",
+                "Configuration": [
+                  {
+                    "Key": "poles",
+                    "Value": "1P"
+                  },
+                  {
+                    "Key": "trip-curve",
+                    "Value": "C"
+                  },
+                  {
+                    "Key": "execution",
+                    "Value": "стаціонарне"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "rated-current",
+                    "Name": "Номінальний струм",
+                    "Value": "16",
+                    "Unit": "A"
+                  },
+                  {
+                    "Key": "rated-voltage",
+                    "Name": "Номінальна напруга",
+                    "Value": "230",
+                    "Unit": "V"
+                  },
+                  {
+                    "Key": "breaking-capacity",
+                    "Name": "Вимикальна здатність",
+                    "Value": "6",
+                    "Unit": "kA"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "1",
+                    "Designation": "1",
+                    "Function": "Вхід L",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "2",
+                    "Designation": "2",
+                    "Function": "Вихід T",
+                    "ElectricalType": "Power"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001401",
+                    "Name": "DIN 1 модуль",
+                    "WidthMm": 17.5,
+                    "HeightMm": 85,
+                    "DepthMm": 69,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 1,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 17.5,
+                          "Y": 0,
+                          "Length": 17.5,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 17.5,
+                          "Y": 0,
+                          "Length": 17.5,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 17.5,
+                          "Y": 85,
+                          "Length": 86.7827747885489,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 17.5,
+                          "Y": 85,
+                          "Length": 86.7827747885489,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001402",
+                    "Name": "Макет з боковим аксесуаром",
+                    "WidthMm": 26.25,
+                    "HeightMm": 85,
+                    "DepthMm": 69,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 1.5,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 26.25,
+                          "Y": 0,
+                          "Length": 26.25,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 26.25,
+                          "Y": 0,
+                          "Length": 26.25,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 26.25,
+                          "Y": 85,
+                          "Length": 88.96101674329043,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 26.25,
+                          "Y": 85,
+                          "Length": 88.96101674329043,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Id": "00000000-0000-0000-0000-000000001302",
+                "Name": "S204 C63",
+                "CatalogNumber": "DEMO-ABB-S204-C63",
+                "RatingText": "C63 · 400 V · 6 kA",
+                "SymbolKey": "IEC_BREAKER",
+                "Configuration": [
+                  {
+                    "Key": "poles",
+                    "Value": "4P"
+                  },
+                  {
+                    "Key": "trip-curve",
+                    "Value": "C"
+                  },
+                  {
+                    "Key": "execution",
+                    "Value": "4NO силових"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "rated-current",
+                    "Name": "Номінальний струм",
+                    "Value": "63",
+                    "Unit": "A"
+                  },
+                  {
+                    "Key": "rated-voltage",
+                    "Name": "Номінальна напруга",
+                    "Value": "400",
+                    "Unit": "V"
+                  },
+                  {
+                    "Key": "breaking-capacity",
+                    "Name": "Вимикальна здатність",
+                    "Value": "6",
+                    "Unit": "kA"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "1L",
+                    "Designation": "1",
+                    "Function": "Вхід L1",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "1T",
+                    "Designation": "5",
+                    "Function": "Вихід T1",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "2L",
+                    "Designation": "2",
+                    "Function": "Вхід L2",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "2T",
+                    "Designation": "6",
+                    "Function": "Вихід T2",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "3L",
+                    "Designation": "3",
+                    "Function": "Вхід L3",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "3T",
+                    "Designation": "7",
+                    "Function": "Вихід T3",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "4L",
+                    "Designation": "4",
+                    "Function": "Вхід L4",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "4T",
+                    "Designation": "8",
+                    "Function": "Вихід T4",
+                    "ElectricalType": "Power"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001403",
+                    "Name": "DIN 4 модулі",
+                    "WidthMm": 70,
+                    "HeightMm": 85,
+                    "DepthMm": 69,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 4,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 70,
+                          "Y": 0,
+                          "Length": 70,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 70,
+                          "Y": 0,
+                          "Length": 70,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 70,
+                          "Y": 85,
+                          "Length": 110.11357772772621,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 70,
+                          "Y": 85,
+                          "Length": 110.11357772772621,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Id": "00000000-0000-0000-0000-000000001202",
+            "Name": "Acti9",
+            "Manufacturer": "Schneider Electric (демо)",
+            "Series": "iC60",
+            "SharedParameters": [
+              {
+                "Key": "standard",
+                "Name": "Нормативний профіль",
+                "Value": "IEC 60898-1 (приклад)",
+                "Unit": null
+              },
+              {
+                "Key": "mounting",
+                "Name": "Типовий монтаж",
+                "Value": "DIN-рейка",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000001303",
+                "Name": "iC60N C32",
+                "CatalogNumber": "DEMO-SE-IC60N-C32",
+                "RatingText": "C32 · 400 V · 6 kA",
+                "SymbolKey": "IEC_BREAKER",
+                "Configuration": [
+                  {
+                    "Key": "poles",
+                    "Value": "3P"
+                  },
+                  {
+                    "Key": "trip-curve",
+                    "Value": "C"
+                  },
+                  {
+                    "Key": "execution",
+                    "Value": "допоміжний контакт OF"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "rated-current",
+                    "Name": "Номінальний струм",
+                    "Value": "32",
+                    "Unit": "A"
+                  },
+                  {
+                    "Key": "breaking-capacity",
+                    "Name": "Вимикальна здатність",
+                    "Value": "6",
+                    "Unit": "kA"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "1L",
+                    "Designation": "1",
+                    "Function": "Вхід L1",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "1T",
+                    "Designation": "4",
+                    "Function": "Вихід T1",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "2L",
+                    "Designation": "2",
+                    "Function": "Вхід L2",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "2T",
+                    "Designation": "5",
+                    "Function": "Вихід T2",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "3L",
+                    "Designation": "3",
+                    "Function": "Вхід L3",
+                    "ElectricalType": "Power"
+                  },
+                  {
+                    "Id": "3T",
+                    "Designation": "6",
+                    "Function": "Вихід T3",
+                    "ElectricalType": "Power"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001404",
+                    "Name": "DIN 3 модулі",
+                    "WidthMm": 54,
+                    "HeightMm": 85,
+                    "DepthMm": 78.5,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 3,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 54,
+                          "Y": 0,
+                          "Length": 54,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 54,
+                          "Y": 0,
+                          "Length": 54,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 54,
+                          "Y": 85,
+                          "Length": 100.70253224224304,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 54,
+                          "Y": 85,
+                          "Length": 100.70253224224304,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 85,
+                          "Length": 85,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Id": "00000000-0000-0000-0000-000000001501",
+        "Name": "Проміжне реле",
+        "Description": "Реле з вільною напругою котушки й різними наборами контактів",
+        "ConfigurationFields": [
+          {
+            "Key": "coil-voltage",
+            "Name": "Напруга котушки",
+            "Required": true,
+            "AllowedValues": null,
+            "Unit": "V"
+          },
+          {
+            "Key": "coil-kind",
+            "Name": "Тип котушки",
+            "Required": true,
+            "AllowedValues": [
+              "DC",
+              "AC"
+            ],
+            "Unit": null
+          },
+          {
+            "Key": "contacts",
+            "Name": "Набір контактів",
+            "Required": true,
+            "AllowedValues": [
+              "1CO",
+              "2CO",
+              "4CO"
+            ],
+            "Unit": null
+          }
+        ],
+        "Families": [
+          {
+            "Id": "00000000-0000-0000-0000-000000001601",
+            "Name": "R-серія",
+            "Manufacturer": "Example Controls",
+            "Series": "R",
+            "SharedParameters": [
+              {
+                "Key": "mounting",
+                "Name": "Типовий монтаж",
+                "Value": "Розетка на DIN-рейку",
+                "Unit": null
+              }
+            ],
+            "Variants": [
+              {
+                "Id": "00000000-0000-0000-0000-000000001701",
+                "Name": "R24-2CO",
+                "CatalogNumber": "DEMO-R24-2CO",
+                "RatingText": "24 V DC · 2CO",
+                "SymbolKey": "IEC_COIL",
+                "Configuration": [
+                  {
+                    "Key": "coil-voltage",
+                    "Value": "24"
+                  },
+                  {
+                    "Key": "coil-kind",
+                    "Value": "DC"
+                  },
+                  {
+                    "Key": "contacts",
+                    "Value": "2CO"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "coil-power",
+                    "Name": "Споживання котушки",
+                    "Value": "0.8",
+                    "Unit": "W"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "A1",
+                    "Designation": "A1",
+                    "Function": "Котушка",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "A2",
+                    "Designation": "A2",
+                    "Function": "Котушка",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "13",
+                    "Designation": "13",
+                    "Function": "NO common",
+                    "ElectricalType": "Control"
+                  },
+                  {
+                    "Id": "14",
+                    "Designation": "14",
+                    "Function": "NO switched",
+                    "ElectricalType": "Control"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001801",
+                    "Name": "Реле з розеткою",
+                    "WidthMm": 15.8,
+                    "HeightMm": 78,
+                    "DepthMm": 72,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 1,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Id": "00000000-0000-0000-0000-000000001702",
+                "Name": "R230-4CO",
+                "CatalogNumber": "DEMO-R230-4CO",
+                "RatingText": "230 V AC · 4CO",
+                "SymbolKey": "IEC_COIL",
+                "Configuration": [
+                  {
+                    "Key": "coil-voltage",
+                    "Value": "230"
+                  },
+                  {
+                    "Key": "coil-kind",
+                    "Value": "AC"
+                  },
+                  {
+                    "Key": "contacts",
+                    "Value": "4CO"
+                  }
+                ],
+                "Parameters": [
+                  {
+                    "Key": "coil-power",
+                    "Name": "Споживання котушки",
+                    "Value": "1.2",
+                    "Unit": "W"
+                  }
+                ],
+                "Contacts": [
+                  {
+                    "Id": "A1",
+                    "Designation": "A1",
+                    "Function": "Котушка",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "A2",
+                    "Designation": "A2",
+                    "Function": "Котушка",
+                    "ElectricalType": "Coil"
+                  },
+                  {
+                    "Id": "13",
+                    "Designation": "13",
+                    "Function": "NO common",
+                    "ElectricalType": "Control"
+                  },
+                  {
+                    "Id": "14",
+                    "Designation": "14",
+                    "Function": "NO switched",
+                    "ElectricalType": "Control"
+                  }
+                ],
+                "PhysicalRepresentations": [
+                  {
+                    "Id": "00000000-0000-0000-0000-000000001802",
+                    "Name": "Реле з розеткою",
+                    "WidthMm": 15.8,
+                    "HeightMm": 78,
+                    "DepthMm": 72,
+                    "Mounting": "DIN-рейка",
+                    "DinModules": 1,
+                    "Outline": [
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 0,
+                          "Length": 15.8,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 15.8,
+                          "Y": 78,
+                          "Length": 79.5841692800773,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        }
+                      },
+                      {
+                        "A": {
+                          "X": 0,
+                          "Y": 78,
+                          "Length": 78,
+                          "IsFinite": true
+                        },
+                        "B": {
+                          "X": 0,
+                          "Y": 0,
+                          "Length": 0,
+                          "IsFinite": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
