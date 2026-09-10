@@ -67,6 +67,83 @@ public sealed class EditorSession
         return library;
     }
 
+    public void ImportComponentLibrary(ComponentLibrary library)
+    {
+        if (library is null) throw new InvalidDataException("Порожня бібліотека.");
+        ApplyDocument(Document with { ComponentLibraries = [.. Document.ComponentLibraries, library] });
+    }
+
+    public void UpdateComponentLibrary(ComponentLibrary library)
+    {
+        if (library is null) throw new InvalidDataException("Порожня бібліотека.");
+        var previous = Document.ComponentLibraries.SingleOrDefault(item => item.Id == library.Id)
+            ?? throw new InvalidDataException("Не знайдено бібліотеку.");
+        var symbolKeys = SymbolLibrary.Definitions(Document).Select(item => item.Key).ToHashSet(StringComparer.Ordinal);
+        ComponentCatalog.Validate([library], symbolKeys);
+        var previousVariants = ComponentCatalog.Variants(Document)
+            .Where(item => item.Library.Id == previous.Id).ToDictionary(item => item.Variant.Id, item => item.Variant);
+        var nextVariants = library.DeviceTypes.SelectMany(type => type.Families)
+            .SelectMany(family => family.Variants).ToDictionary(item => item.Id);
+        var linked = Document.Elements.Where(item => item.ComponentVariantId is not null).ToArray();
+        if (linked.Any(item => !nextVariants.ContainsKey(item.ComponentVariantId!.Value) &&
+            previousVariants.ContainsKey(item.ComponentVariantId.Value)))
+            throw new InvalidDataException("Не можна видалити варіант, який використовується на схемі.");
+        foreach (var item in linked.Where(item => item.ComponentVariantId is { } id && nextVariants.ContainsKey(id)))
+            if (nextVariants[item.ComponentVariantId!.Value].SymbolKey != item.SymbolKey)
+                throw new InvalidDataException("Не можна змінити умовне позначення варіанта, який використовується на схемі.");
+
+        library = library with { Version = checked(previous.Version + 1) };
+        var elements = Document.Elements.Select(item =>
+        {
+            if (item.ComponentVariantId is not { } variantId || !nextVariants.TryGetValue(variantId, out var variant)) return item;
+            return item.PhysicalRepresentationId is { } physicalId &&
+                variant.PhysicalRepresentations.Any(physical => physical.Id == physicalId)
+                ? item : item with { PhysicalRepresentationId = variant.PhysicalRepresentations[0].Id };
+        }).ToArray();
+        ApplyDocument(Document with
+        {
+            ComponentLibraries = Document.ComponentLibraries.Select(item => item.Id == library.Id ? library : item).ToArray(),
+            Elements = elements
+        });
+    }
+
+    public void DeleteComponentLibrary(Guid libraryId)
+    {
+        var library = Document.ComponentLibraries.SingleOrDefault(item => item.Id == libraryId)
+            ?? throw new InvalidDataException("Не знайдено бібліотеку.");
+        var variantIds = library.DeviceTypes.SelectMany(type => type.Families).SelectMany(family => family.Variants)
+            .Select(variant => variant.Id).ToHashSet();
+        if (Document.Elements.Any(item => item.ComponentVariantId is { } id && variantIds.Contains(id)))
+            throw new InvalidDataException("Не можна видалити бібліотеку, варіанти якої використані на схемі.");
+        ApplyDocument(Document with { ComponentLibraries = Document.ComponentLibraries.Where(item => item.Id != libraryId).ToArray() });
+    }
+
+    public ComponentLibrary DuplicateComponentLibrary(Guid libraryId)
+    {
+        var source = Document.ComponentLibraries.SingleOrDefault(item => item.Id == libraryId)
+            ?? throw new InvalidDataException("Не знайдено бібліотеку.");
+        var baseName = source.Name + " — копія"; var name = baseName; var suffix = 2;
+        while (Document.ComponentLibraries.Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            name = $"{baseName} {suffix++}";
+        var copy = source with
+        {
+            Id = Guid.NewGuid(), Name = name, Version = 1,
+            DeviceTypes = source.DeviceTypes.Select(type => type with
+            {
+                Id = Guid.NewGuid(), Families = type.Families.Select(family => family with
+                {
+                    Id = Guid.NewGuid(), Variants = family.Variants.Select(variant => variant with
+                    {
+                        Id = Guid.NewGuid(), PhysicalRepresentations = variant.PhysicalRepresentations
+                            .Select(physical => physical with { Id = Guid.NewGuid() }).ToArray()
+                    }).ToArray()
+                }).ToArray()
+            }).ToArray()
+        };
+        ImportComponentLibrary(copy);
+        return copy;
+    }
+
     public DeviceTypeDefinition CreateDeviceType(Guid libraryId, string name, string? description,
         ConfigurationField[] configurationFields)
     {
@@ -300,7 +377,7 @@ public sealed class EditorSession
     {
         if (!Document.ComponentLibraries.Any(item => item.Id == libraryId)) throw new InvalidDataException("Не знайдено бібліотеку.");
         ApplyDocument(Document with { ComponentLibraries = Document.ComponentLibraries.Select(item =>
-            item.Id == libraryId ? update(item) : item).ToArray() });
+            item.Id == libraryId ? update(item) with { Version = checked(item.Version + 1) } : item).ToArray() });
     }
 
     private void ReplaceType(Guid libraryId, Guid typeId, Func<DeviceTypeDefinition, DeviceTypeDefinition> update) =>

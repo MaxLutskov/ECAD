@@ -168,7 +168,7 @@ public sealed class PropertyPanel : Border
                 var linked = ComponentCatalog.FindVariant(session.Document, element.ComponentVariantId);
                 if (linked is null)
                     panel.Children.Add(SectionNote("Дані компонента", variantChoices.Length == 1
-                        ? "У документі ще немає сумісних варіантів пристрою. Їх створюватиме редактор бібліотеки 0.14."
+                        ? "У документі ще немає сумісних варіантів пристрою. Створи їх кнопкою «Бібліотеки пристроїв» (▤)."
                         : "Обери варіант пристрою та фізичне виконання."));
                 else
                 {

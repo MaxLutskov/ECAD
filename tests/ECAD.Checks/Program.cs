@@ -347,6 +347,43 @@ Check("Device catalog rejects invalid variants and incompatible symbols", () =>
     Reject(() => s.AssignDeviceVariant(breaker.Id, valid.Id));
     Assert(ReferenceEquals(before, s.Document));
 });
+Check("Catalog updates preserve links, remap removed cases and reject breaking edits", () =>
+{
+    var s = new EditorSession(); s.Load(ProjectFile.Open(Path.Combine(output, "device-catalog.ecad")));
+    var library = s.Document.ComponentLibraries.Single();
+    var type = library.DeviceTypes.Single(); var family = type.Families.Single(); var variant = family.Variants.Single();
+    var remainingPhysical = variant.PhysicalRepresentations[1];
+    var updatedVariant = variant with { RatingText = "C63, 415 V", PhysicalRepresentations = [remainingPhysical] };
+    var updatedFamily = family with { Variants = [updatedVariant] };
+    var updatedType = type with { Families = [updatedFamily] };
+    s.UpdateComponentLibrary(library with { DeviceTypes = [updatedType] });
+    Assert(s.Document.ComponentLibraries.Single().Version == library.Version + 1);
+    Assert(s.Document.Elements.Single().PhysicalRepresentationId == remainingPhysical.Id);
+
+    var before = s.Document;
+    Reject(() => s.UpdateComponentLibrary(s.Document.ComponentLibraries.Single() with
+    {
+        DeviceTypes = [updatedType with { Families = [updatedFamily with { Variants = [updatedVariant with { SymbolKey = "IEC_COIL" }] }] }]
+    }));
+    Assert(ReferenceEquals(before, s.Document));
+    Reject(() => s.DeleteComponentLibrary(library.Id)); Assert(ReferenceEquals(before, s.Document));
+});
+Check("Catalog libraries copy and round-trip through ecadlib files", () =>
+{
+    var s = new EditorSession(); s.Load(ProjectFile.Open(Path.Combine(output, "device-catalog.ecad")));
+    var source = s.Document.ComponentLibraries.Single(); var copy = s.DuplicateComponentLibrary(source.Id);
+    Assert(copy.Name != source.Name && copy.Id != source.Id && copy.Version == 1);
+    var sourceIds = source.DeviceTypes.SelectMany(type => new[] { type.Id }.Concat(type.Families.SelectMany(family =>
+        new[] { family.Id }.Concat(family.Variants.SelectMany(variant => new[] { variant.Id }.Concat(variant.PhysicalRepresentations.Select(item => item.Id))))))).ToHashSet();
+    var copyIds = copy.DeviceTypes.SelectMany(type => new[] { type.Id }.Concat(type.Families.SelectMany(family =>
+        new[] { family.Id }.Concat(family.Variants.SelectMany(variant => new[] { variant.Id }.Concat(variant.PhysicalRepresentations.Select(item => item.Id))))))).ToHashSet();
+    Assert(!sourceIds.Overlaps(copyIds));
+    var path = Path.Combine(output, "industrial.ecadlib"); ComponentLibraryFile.Save(path, copy);
+    var reopened = ComponentLibraryFile.Open(path, SymbolLibrary.Definitions(s.Document).Select(item => item.Key));
+    Assert(reopened.Id == copy.Id && reopened.Name == copy.Name && reopened.DeviceTypes.Single().Families.Single().Variants.Single().Name == "S204 C63");
+    var imported = new EditorSession(); imported.ImportComponentLibrary(reopened);
+    Assert(imported.Document.ComponentLibraries.Single().Id == copy.Id); imported.Undo(); Assert(imported.Document.ComponentLibraries.Length == 0);
+});
 
 AppBuilder.Configure<App>().UseSkia().WithInterFont()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
@@ -995,6 +1032,36 @@ Check("Property panel assigns and displays a device variant", () =>
         .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
     Assert(interactive.Document.Elements.Single(e => e.Id == symbol.Id).PhysicalRepresentationId != symbol.PhysicalRepresentationId);
     propertyWindow.Close();
+});
+Check("Library editor creates every hierarchy level and searches variants", () =>
+{
+    var catalogSession = new EditorSession();
+    var dialog = new LibraryEditorWindow(catalogSession); dialog.Show(); Dispatcher.UIThread.RunJobs();
+    Button NamedButton(string name) => dialog.GetVisualDescendants().OfType<Button>().Single(item => item.Name == name);
+    NamedButton("NewLibrary").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    NamedButton("AddLevel1").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "TypeConfigurationFields").Text =
+        "channels | Кількість каналів | так | 1,2,16 |";
+    NamedButton("SaveLibraryItem").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    NamedButton("AddLevel2").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    NamedButton("AddLevel3").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "VariantConfiguration").Text = "channels | 16";
+    dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "VariantParameters").Text = "voltage | Напруга живлення | 24 | V DC";
+    dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "VariantContacts").Text = "A1 | A1 | Живлення + | Power\nA2 | A2 | Живлення - | Power";
+    dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "VariantPhysical").Text =
+        "DIN-корпус | 22.5 | 100 | 115 | DIN-рейка | 1.25\nПанельний корпус | 30 | 110 | 120 | Панель |";
+    NamedButton("SaveLibraryItem").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    var library = catalogSession.Document.ComponentLibraries.Single();
+    var created = library.DeviceTypes.Single().Families.Single().Variants.Single();
+    Assert(created.Configuration.Single().Value == "16" && created.Contacts.Length == 2 && created.PhysicalRepresentations.Length == 2);
+    var search = dialog.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "LibrarySearch");
+    search.Text = "16"; Dispatcher.UIThread.RunJobs();
+    Assert(dialog.GetVisualDescendants().OfType<ListBox>().Single(item => item.Name == "DeviceVariantList").ItemCount == 1);
+    using (var frame = dialog.CaptureRenderedFrame() ?? throw new Exception("No rendered library editor"))
+        frame.Save(Path.Combine(output, "library-editor.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+    NamedButton("CopyLibrary").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Assert(catalogSession.Document.ComponentLibraries.Length == 2);
+    dialog.Close();
 });
 liveWindow.Close();
 Check("Main window refreshes and selects a newly created custom symbol", () =>

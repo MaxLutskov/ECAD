@@ -32,7 +32,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.13  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.14  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
@@ -40,6 +40,7 @@ public sealed class MainWindow : Window
         AddAsyncIconButton(files, "+", "Новий аркуш", async () => { if (await CanDiscard()) { canvas.Cancel(); session.Load(new()); saved = session.Document; currentPath = null; UpdateTitle(); } });
         AddAsyncIconButton(files, "↗", "Відкрити…", Open);
         AddAsyncIconButton(files, "↓", "Зберегти…", Save);
+        AddAsyncIconButton(files, "▤", "Бібліотеки пристроїв", ShowLibraryEditor);
         var edit = AddToolbarGroup(commands, "Редагування");
         AddIconButton(edit, "↶", "Скасувати (Ctrl+Z)", () => { canvas.Cancel(); session.Undo(); });
         AddIconButton(edit, "↷", "Повторити (Ctrl+Y)", () => { canvas.Cancel(); session.Redo(); });
@@ -323,6 +324,14 @@ public sealed class MainWindow : Window
         });
         dialog.Content = root;
         await dialog.ShowDialog(this);
+    }
+
+    private async Task ShowLibraryEditor()
+    {
+        canvas.Cancel();
+        var dialog = new LibraryEditorWindow(session);
+        await dialog.ShowDialog(this);
+        status.Text = "Редактор бібліотек закрито.";
     }
 
     private async Task ShowElectricalIssues()
