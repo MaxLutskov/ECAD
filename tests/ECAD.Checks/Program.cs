@@ -413,6 +413,20 @@ Check("One path tool switches between electrical and graphical lines", () =>
     liveCanvas.EscapeToSelection();
     Assert(liveCanvas.Tool is null && liveCanvas.ActivePathKind == ElementKind.Line);
 });
+Check("L C R D keyboard shortcuts activate drawing tools", () =>
+{
+    void Press(PhysicalKey key)
+    {
+        liveWindow.KeyPressQwerty(key, RawInputModifiers.None);
+        liveWindow.KeyReleaseQwerty(key, RawInputModifiers.None);
+    }
+    liveCanvas.SetPathKind(ElementKind.Wire); liveCanvas.Focus();
+    Press(PhysicalKey.L); Assert(liveCanvas.Tool == ElementKind.Wire);
+    Press(PhysicalKey.C); Assert(liveCanvas.Tool == ElementKind.Circle);
+    Press(PhysicalKey.R); Assert(liveCanvas.Tool == ElementKind.Rectangle);
+    Press(PhysicalKey.D); Assert(liveCanvas.Tool == ElementKind.Dimension);
+    liveCanvas.EscapeToSelection();
+});
 Check("Floating input: type length, Tab, angle and Enter", () =>
 {
     interactive.Load(new()); liveCanvas.SetTool(ElementKind.Line); Tap(60, 60); liveWindow.MouseMove(new(240, 160));
@@ -678,6 +692,9 @@ Check("Main window refreshes and selects a newly created custom symbol", () =>
 Check("Main window renders with Ukrainian controls", () =>
 {
     var main = new MainWindow(); main.Show();
+    var labels = main.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text).ToHashSet();
+    Assert(labels.Contains("Файл") && labels.Contains("Редагування") && labels.Contains("Інструменти") && labels.Contains("Параметри побудови"));
+    Assert(main.GetVisualDescendants().OfType<Button>().Count(button => ToolTip.GetTip(button) is string) >= 15);
     main.MouseDown(new(500, 450), MouseButton.Left);
     main.MouseUp(new(500, 450), MouseButton.Left);
     using var frame = main.CaptureRenderedFrame() ?? throw new Exception("No rendered main window");

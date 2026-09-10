@@ -768,6 +768,22 @@ public sealed class DrawingCanvas : Decorator
         }
         if (e.Key == Key.Escape) { EscapeToSelection(); e.Handled = true; }
         else if (e.Key == Key.Delete) { Cancel(); session.Delete(); e.Handled = true; }
+        else if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.L or Key.C or Key.R or Key.D)
+        {
+            switch (e.Key)
+            {
+                case Key.L:
+                    ActivatePathTool();
+                    Status?.Invoke(ActivePathKind == ElementKind.Wire
+                        ? "Провідник (L): задай початок траси."
+                        : "Графічна лінія (L): задай початок.");
+                    break;
+                case Key.C: SetTool(ElementKind.Circle); Status?.Invoke("Коло (C): задай центр."); break;
+                case Key.R: SetTool(ElementKind.Rectangle); Status?.Invoke("Прямокутник (R): задай перший кут."); break;
+                case Key.D: SetTool(ElementKind.Dimension); Status?.Invoke("Розмір (D): обери дві опорні геометрії."); break;
+            }
+            e.Handled = true;
+        }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             Cancel();
