@@ -30,6 +30,13 @@ public readonly record struct SelectionBox(double Left, double Top, double Right
             var farthest = new PointMm(Math.Max(Math.Abs(e.A.X - Left), Math.Abs(e.A.X - Right)), Math.Max(Math.Abs(e.A.Y - Top), Math.Abs(e.A.Y - Bottom)));
             return (nearest - e.A).Length <= r && farthest.Length >= r;
         }
+        if (e.Kind == ElementKind.Arc)
+        {
+            var points = ArcGeometry.Sample(e);
+            var arcEdges = points.Zip(points.Skip(1), (a, b) => (a, b));
+            var arcBox = this;
+            return crossing ? arcEdges.Any(edge => arcBox.Crosses(edge.a, edge.b)) : points.All(arcBox.Contains);
+        }
         var edges = e.Kind == ElementKind.Dimension ? e.DimensionSegments() : AssociativeDimensions.Edges(e);
         var box = this;
         return crossing ? edges.Any(edge => box.Crosses(edge.A, edge.B)) : edges.All(edge => box.Contains(edge.A) && box.Contains(edge.B));

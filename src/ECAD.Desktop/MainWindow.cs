@@ -32,7 +32,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.11  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.12  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
@@ -48,6 +48,9 @@ public sealed class MainWindow : Window
         AddIconButton(edit, "⧉", "Копіювати (Ctrl+C)", canvas.CopySelection);
         AddIconButton(edit, "▣", "Вставити (Ctrl+V)", canvas.PasteSelection);
         AddIconButton(edit, "↻", "Повернути на 90° (Ctrl+R)", canvas.RotateSelection90);
+        AddIconButton(edit, "⌇", "Розбити лінію або сегмент полілінії", canvas.BeginSplitSegment);
+        AddIconButton(edit, "⌫", "Обрізати пряму лінію до межі", canvas.BeginTrim);
+        AddIconButton(edit, "⇥", "Продовжити пряму лінію до межі", canvas.BeginExtend);
         AddIconButton(edit, "×", "Видалити (Delete)", () => { canvas.Cancel(); session.Delete(); });
         var checks = AddToolbarGroup(commands, "Перевірка і вигляд");
         AddAsyncIconButton(checks, "✓", "Перевірити схему", ShowElectricalIssues);
@@ -66,6 +69,8 @@ public sealed class MainWindow : Window
         });
         AddIconButton(tools, "▭", "Прямокутник (R)", () => SetTool(ElementKind.Rectangle, "Прямокутник: два кути або початок → ширина → Tab → висота → Enter."));
         AddIconButton(tools, "○", "Коло (C)", () => SetTool(ElementKind.Circle, "Коло: центр і точка або центр → радіус; Tab перемикає на діаметр."));
+        AddIconButton(tools, "⌁", "Полілінія (P)", () => SetTool(ElementKind.Polyline, "Полілінія: послідовні вершини або точні сегменти; Enter завершує."));
+        AddIconButton(tools, "⌒", "Дуга (A)", () => SetTool(ElementKind.Arc, "Дуга: три точки або центр → радіус → Tab → кут → Enter."));
         AddIconButton(tools, "↔", "Розмір (D)", () => SetTool(ElementKind.Dimension, "Розмір: обери дві точки / паралельні лінії, потім клацни місце напису."));
         AddIconButton(tools, "●", "Точка з’єднання", () => SetTool(ElementKind.Junction, "Вузол: клацни кінець, сегмент або перетин ліній. Звичайний перетин без точки не є з’єднанням."));
         AddIconButton(tools, "T", "Текст", () => SetTool(ElementKind.Text, "Текст: клацни місце розташування. Подвійний клік редагує наявний напис."));
@@ -111,7 +116,7 @@ public sealed class MainWindow : Window
         footer.Children.Add(status);
         footer.Children.Add(new TextBlock
         {
-            Text = "A3 · мм   |   L: лінія · C: коло · R: прямокутник · D: розмір · Esc: вибір · Колесо: масштаб · Середня кнопка: панорама",
+            Text = "A3 · мм   |   L: лінія · C: коло · R: прямокутник · P: полілінія · A: дуга · D: розмір · Esc: вибір · Колесо: масштаб",
             FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(12, 0, 12, 8)
         });
         var properties = new PropertyPanel(session, message => status.Text = message);

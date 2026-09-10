@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace ECAD.Core;
 
 [JsonConverter(typeof(JsonStringEnumConverter<ElementKind>))]
-public enum ElementKind { Line, Rectangle, Circle, Dimension, Junction, Text, Wire, Symbol }
+public enum ElementKind { Line, Rectangle, Circle, Dimension, Junction, Text, Wire, Symbol, Polyline, Arc }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DimensionType>))]
 public enum DimensionType { Aligned, Horizontal, Vertical, Radius, Diameter }
@@ -31,6 +31,7 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
     public PointMm[]? PinOffsets { get; init; }
     public SymbolStroke[]? SymbolStrokes { get; init; }
     public Guid? LinkedElementId { get; init; }
+    public double ArcSweepDegrees { get; init; }
     [JsonIgnore] public double LengthMm => (B - A).Length;
     [JsonIgnore] public double DimensionValueMm => DimensionType switch
     {
@@ -39,7 +40,7 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
         DimensionType.Diameter => LengthMm * 2,
         _ => LengthMm
     };
-    [JsonIgnore] public PointMm[] GeometryPoints => Kind == ElementKind.Wire ? Points! : [A, B];
+    [JsonIgnore] public PointMm[] GeometryPoints => Kind is ElementKind.Wire or ElementKind.Polyline ? Points! : [A, B];
     public DrawingElement Move(PointMm delta) => this with
     {
         A = A + delta, B = B + delta,
@@ -86,7 +87,8 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
                 local.Y >= -TextHeightMm - tolerance && local.Y <= height - TextHeightMm + tolerance;
         }
         if (Kind == ElementKind.Circle) return Math.Abs((p - A).Length - LengthMm) <= tolerance;
-        if (Kind == ElementKind.Wire)
+        if (Kind == ElementKind.Arc) return ArcGeometry.DistanceToArc(this, p) <= tolerance;
+        if (Kind is ElementKind.Wire or ElementKind.Polyline)
             return AssociativeDimensions.Edges(this).Any(edge => Geometry.DistanceToSegment(p, edge.A, edge.B) <= tolerance);
         if (Kind == ElementKind.Dimension)
             return DimensionSegments().Any(edge => Geometry.DistanceToSegment(p, edge.A, edge.B) <= tolerance);
@@ -101,7 +103,7 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 8;
+    public int SchemaVersion { get; init; } = 9;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
@@ -109,7 +111,7 @@ public sealed record DrawingDocument
 
     public void Validate()
     {
-        if (SchemaVersion is < 1 or > 8) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > 9) throw new InvalidDataException("Непідтримувана версія документа.");
         if (!double.IsFinite(WidthMm) || !double.IsFinite(HeightMm) || WidthMm <= 0 || HeightMm <= 0 ||
             WidthMm > 10000 || HeightMm > 10000)
             throw new InvalidDataException("Некоректний розмір аркуша.");
@@ -133,8 +135,9 @@ public sealed record DrawingDocument
                     (e.DimensionTargetMm is not > 0 || !double.IsFinite(e.DimensionTargetMm.Value))) ||
                 !double.IsFinite(e.TextHeightMm) || e.TextHeightMm is < .5 or > 100 ||
                 !double.IsFinite(e.RotationDegrees) ||
+                !double.IsFinite(e.ArcSweepDegrees) || !ValidArc(e) ||
                 (e.Kind == ElementKind.Text ? string.IsNullOrWhiteSpace(e.Text) || e.Text.Length > 4096 : e.Text is not null) ||
-                !ValidWire(e) || !ValidSymbol(e, symbolKeys) ||
+                !ValidPath(e) || !ValidSymbol(e, symbolKeys) ||
                 (e.LinkedElementId is not null && (e.Kind != ElementKind.Text || e.LinkedElementId == Guid.Empty)) ||
                 (e.Kind != ElementKind.Dimension && (e.StartReference is not null || e.EndReference is not null)) ||
                 e.GroupId == Guid.Empty || (e.Kind == ElementKind.Rectangle && (e.A.X == e.B.X || e.A.Y == e.B.Y)))
@@ -148,13 +151,17 @@ public sealed record DrawingDocument
         DrivingDimensions.Validate(Elements);
     }
 
-    private static bool ValidWire(DrawingElement e)
+    private static bool ValidPath(DrawingElement e)
     {
-        if (e.Kind != ElementKind.Wire) return e.Points is null;
+        if (e.Kind is not (ElementKind.Wire or ElementKind.Polyline)) return e.Points is null;
         if (e.Points is not { Length: >= 2 and <= 10000 } points || points.Any(p => !p.IsFinite) ||
             points[0] != e.A || points[^1] != e.B) return false;
         return points.Zip(points.Skip(1)).All(pair => pair.First != pair.Second);
     }
+
+    private static bool ValidArc(DrawingElement e) => e.Kind == ElementKind.Arc
+        ? e.LengthMm > 1e-9 && Math.Abs(e.ArcSweepDegrees) is > 1e-7 and < 360
+        : e.ArcSweepDegrees == 0;
 
     private static bool ValidSymbol(DrawingElement e, HashSet<string> symbolKeys)
     {

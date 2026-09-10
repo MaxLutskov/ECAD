@@ -45,7 +45,8 @@ public sealed class EditorSession
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(prefix))
             throw new InvalidDataException("Вкажи назву та префікс символу.");
-        var graphics = Document.Elements.Where(e => Selection.Contains(e.Id) && e.Kind is ElementKind.Line or ElementKind.Rectangle).ToArray();
+        var graphics = Document.Elements.Where(e => Selection.Contains(e.Id) &&
+            e.Kind is ElementKind.Line or ElementKind.Rectangle or ElementKind.Polyline or ElementKind.Arc).ToArray();
         var pins = Document.Elements.Where(e => Selection.Contains(e.Id) && e.Kind == ElementKind.Junction).Select(e => e.A).ToArray();
         var edges = graphics.SelectMany(AssociativeDimensions.Edges).ToArray();
         if (edges.Length == 0 || pins.Length == 0)
@@ -76,6 +77,22 @@ public sealed class EditorSession
         return e with { DimensionOffset = e.DimensionOffset - v.Y * delta.X + v.X * delta.Y };
     }).ToArray());
     public void Move(PointMm delta) => Apply(PreviewMove(delta));
+
+    public DrawingElement[] PreviewMoveVertex(Guid elementId, int vertexIndex, PointMm target)
+    {
+        var source = Document.Elements.SingleOrDefault(e => e.Id == elementId)
+            ?? throw new InvalidDataException("Не знайдено полілінію.");
+        if (source.Kind != ElementKind.Polyline || source.Points is null || vertexIndex < 0 || vertexIndex >= source.Points.Length)
+            throw new InvalidDataException("Редагування вершини доступне для полілінії.");
+        var points = source.Points.ToArray(); points[vertexIndex] = target;
+        if (points.Zip(points.Skip(1)).Any(pair => pair.First == pair.Second))
+            throw new InvalidDataException("Сусідні вершини полілінії не можуть збігатися.");
+        var updated = source with { A = points[0], B = points[^1], Points = points };
+        return AssociativeDimensions.ResolveAll(Document.Elements.Select(e => e.Id == elementId ? updated : e).ToArray());
+    }
+
+    public void MoveVertex(Guid elementId, int vertexIndex, PointMm target) =>
+        Apply(PreviewMoveVertex(elementId, vertexIndex, target));
 
     public void SelectBox(SelectionBox box, bool crossing, bool additive)
     {
@@ -135,7 +152,8 @@ public sealed class EditorSession
                 (e.StartReference is null && e.EndReference is null))
             .SelectMany(e => e.Kind == ElementKind.Circle
                 ? new[] { e.A - new PointMm(e.LengthMm, e.LengthMm), e.A + new PointMm(e.LengthMm, e.LengthMm) }
-                : e.Kind == ElementKind.Wire ? e.Points! : new[] { e.A, e.B }).ToArray();
+                : e.Kind == ElementKind.Arc ? ArcGeometry.Sample(e)
+                : e.Kind is ElementKind.Wire or ElementKind.Polyline ? e.Points! : new[] { e.A, e.B }).ToArray();
         if (points.Length == 0) return;
         var centre = new PointMm((points.Min(p => p.X) + points.Max(p => p.X)) / 2,
             (points.Min(p => p.Y) + points.Max(p => p.Y)) / 2);
@@ -154,7 +172,7 @@ public sealed class EditorSession
                 var a = Rotate(e.A); var b = Rotate(e.B);
                 return e with { A = new(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y)), B = new(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y)) };
             }
-            if (e.Kind == ElementKind.Wire)
+            if (e.Kind is ElementKind.Wire or ElementKind.Polyline)
             {
                 var points = e.Points!.Select(Rotate).ToArray();
                 return e with { A = points[0], B = points[^1], Points = points };
@@ -221,10 +239,10 @@ public sealed class EditorSession
 
     private static DrawingDocument Normalize(DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 8)
+        if (document.SchemaVersion is < 1 or > 9)
             throw new InvalidDataException("Непідтримувана версія документа.");
         var elements = DrivingDimensions.ApplyAll(document.Elements);
-        var normalized = document with { SchemaVersion = 8, Elements = elements };
+        var normalized = document with { SchemaVersion = 9, Elements = elements };
         normalized.Validate();
         return normalized;
     }

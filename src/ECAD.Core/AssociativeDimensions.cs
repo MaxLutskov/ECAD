@@ -12,6 +12,8 @@ public static class AssociativeDimensions
         ElementKind.Circle => [e.A],
         ElementKind.Line => [e.A, e.B],
         ElementKind.Wire => e.Points!,
+        ElementKind.Polyline => e.Points!,
+        ElementKind.Arc => [e.A, e.B, ArcGeometry.EndPoint(e)],
         ElementKind.Symbol => SymbolLibrary.PinPositions(e),
         ElementKind.Junction or ElementKind.Text => [e.A],
         _ => []
@@ -21,6 +23,8 @@ public static class AssociativeDimensions
     {
         ElementKind.Line => [(e.A, e.B)],
         ElementKind.Wire => e.Points!.Zip(e.Points!.Skip(1), (a, b) => (a, b)).ToArray(),
+        ElementKind.Polyline => e.Points!.Zip(e.Points!.Skip(1), (a, b) => (a, b)).ToArray(),
+        ElementKind.Arc => ArcGeometry.Sample(e).Zip(ArcGeometry.Sample(e).Skip(1), (a, b) => (a, b)).ToArray(),
         ElementKind.Rectangle => [(e.A, new(e.B.X, e.A.Y)), (new(e.B.X, e.A.Y), e.B),
             (e.B, new(e.A.X, e.B.Y)), (new(e.A.X, e.B.Y), e.A)],
         _ => []
@@ -39,8 +43,18 @@ public static class AssociativeDimensions
                 { distance = (vertices[i] - p).Length; best = new(vertices[i], new(e.Id, ReferenceKind.Vertex, i)); }
         }
         if (best is not null) return best;
-        foreach (var e in list.Where(e => e.Kind == ElementKind.Circle))
+        foreach (var e in list.Where(e => e.Kind is ElementKind.Circle or ElementKind.Arc))
         {
+            if (e.Kind == ElementKind.Arc)
+            {
+                var nearest = ArcGeometry.NearestPoint(e, p);
+                if (nearest.Distance <= distance)
+                {
+                    distance = nearest.Distance;
+                    best = new(nearest.Point, new(e.Id, ReferenceKind.Curve, 0, nearest.Parameter));
+                }
+                continue;
+            }
             var delta = p - e.A;
             if (delta.Length < 1e-9 || Math.Abs(delta.Length - e.LengthMm) > distance) continue;
             var angle = Math.Atan2(delta.Y, delta.X);
@@ -79,7 +93,7 @@ public static class AssociativeDimensions
         {
             ReferenceKind.Vertex => Vertices(e).Length,
             ReferenceKind.Edge => Edges(e).Length,
-            ReferenceKind.Curve when e.Kind == ElementKind.Circle => 1,
+            ReferenceKind.Curve when e.Kind is ElementKind.Circle or ElementKind.Arc => 1,
             _ => 0
         };
         if (r.Index >= count) throw new InvalidDataException("Не знайдено геометрію прив’язки.");
@@ -92,6 +106,7 @@ public static class AssociativeDimensions
         if (r.Kind == ReferenceKind.Vertex) return Vertices(e)[r.Index];
         if (r.Kind == ReferenceKind.Curve)
         {
+            if (e.Kind == ElementKind.Arc) return ArcGeometry.PointAt(e, r.Parameter);
             var angle = r.Parameter * Math.PI * 2;
             return e.A + new PointMm(Math.Cos(angle), Math.Sin(angle)) * e.LengthMm;
         }

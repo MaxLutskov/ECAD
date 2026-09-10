@@ -99,9 +99,22 @@ public sealed class PropertyPanel : Border
                 }
                 else
                 {
-                    Field("Length", "Загальна довжина, мм", WireLength(element), true);
+                    Field("Length", "Загальна довжина, мм", PathLength(element), true);
                     Field("Segments", "Кількість сегментів", element.Points.Length - 1, true);
                 }
+                break;
+            case ElementKind.Polyline:
+                Field("Length", "Загальна довжина, мм", PathLength(element), true);
+                Field("Segments", "Кількість сегментів", element.Points!.Length - 1, true);
+                var vertices = Field("Vertices", "Вершини: X; Y — по одній у рядку", FormatPoints(element.Points));
+                vertices.AcceptsReturn = true; vertices.MinHeight = 90; vertices.TextWrapping = TextWrapping.NoWrap;
+                break;
+            case ElementKind.Arc:
+                Field("X", "X центра, мм", element.A.X); Field("Y", "Y центра, мм", element.A.Y);
+                Field("Radius", "Радіус, мм", element.LengthMm);
+                Field("StartAngle", "Початковий кут, °", Geometry.Angle(element.B - element.A));
+                Field("Sweep", "Кут дуги, °", element.ArcSweepDegrees);
+                Field("EndAngle", "Кінцевий кут, °", Geometry.Angle(ArcGeometry.EndPoint(element) - element.A), true);
                 break;
             case ElementKind.Rectangle:
                 Field("X", "X, мм", element.A.X); Field("Y", "Y, мм", element.A.Y);
@@ -210,6 +223,25 @@ public sealed class PropertyPanel : Border
                 else updated = updated.Move(a - source.A);
                 break;
             }
+            case ElementKind.Polyline:
+            {
+                var points = ParsePoints(fields["Vertices"].Text);
+                updated = updated with { A = points[0], B = points[^1], Points = points };
+                break;
+            }
+            case ElementKind.Arc:
+            {
+                var centre = Position(); var radius = Positive(fields, "Radius");
+                var sweep = Number(fields, "Sweep");
+                if (Math.Abs(sweep) < 1e-7 || Math.Abs(sweep) >= 360)
+                    throw new InvalidDataException("Кут дуги має бути в межах від -360° до 360° і не дорівнювати нулю.");
+                updated = updated with
+                {
+                    A = centre, B = Geometry.Polar(centre, radius, Number(fields, "StartAngle")),
+                    ArcSweepDegrees = sweep
+                };
+                break;
+            }
             case ElementKind.Rectangle:
             {
                 var a = Position(); var width = Positive(fields, "Width"); var height = Positive(fields, "Height");
@@ -282,10 +314,28 @@ public sealed class PropertyPanel : Border
     }
 
     private static string Format(double value) => value.ToString("0.###", CultureInfo.CurrentCulture);
-    private static double WireLength(DrawingElement element)
+    private static double PathLength(DrawingElement element)
     {
         var points = element.Points!;
         return points.Zip(points.Skip(1), (a, b) => (b - a).Length).Sum();
+    }
+    private static string FormatPoints(PointMm[] points) => string.Join(Environment.NewLine,
+        points.Select(p => $"{Format(p.X)}; {Format(p.Y)}"));
+    private static PointMm[] ParsePoints(string? text)
+    {
+        var points = (text ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select((line, index) =>
+            {
+                var parts = line.Split([';', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length != 2 || !double.TryParse(parts[0].Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                    !double.TryParse(parts[1].Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+                    !double.IsFinite(x) || !double.IsFinite(y))
+                    throw new FormatException($"Некоректні координати вершини в рядку {index + 1}.");
+                return new PointMm(x, y);
+            }).ToArray();
+        if (points.Length < 2 || points.Zip(points.Skip(1)).Any(pair => pair.First == pair.Second))
+            throw new InvalidDataException("Полілінія повинна мати щонайменше дві різні послідовні вершини.");
+        return points;
     }
     private static TextBlock Info(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray };
     private static Border SectionNote(string title, string text) => new()
@@ -298,6 +348,7 @@ public sealed class PropertyPanel : Border
     private static string KindName(ElementKind kind) => kind switch
     {
         ElementKind.Line => "Графічна лінія", ElementKind.Wire => "Провідник",
+        ElementKind.Polyline => "Полілінія", ElementKind.Arc => "Дуга",
         ElementKind.Rectangle => "Прямокутник", ElementKind.Circle => "Коло",
         ElementKind.Dimension => "Розмір", ElementKind.Junction => "Точка з’єднання",
         ElementKind.Text => "Текст", ElementKind.Symbol => "Символ", _ => kind.ToString()

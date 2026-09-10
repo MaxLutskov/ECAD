@@ -11,11 +11,15 @@ namespace ECAD.Desktop;
 
 public sealed class DrawingCanvas : Decorator
 {
+    private enum CanvasOperation { None, SplitSegment, Trim, Extend }
     private readonly EditorSession session;
     private PointMm? anchor;
     private PointMm cursor;
     private PointMm? dragStart;
     private PointMm dragDelta;
+    private Guid? vertexElementId;
+    private int vertexIndex = -1;
+    private PointMm vertexTarget;
     private Point? panStart;
     private Point origin = new(36, 36);
     private double scale = 2.4;
@@ -27,8 +31,11 @@ public sealed class DrawingCanvas : Decorator
     private DrawingElement? pendingDimension;
     private Guid? editingElementId;
     private readonly List<PointMm> wirePoints = [];
+    private readonly List<PointMm> arcPoints = [];
     private bool wireHorizontalFirst = true;
     private Point inputPosition;
+    private CanvasOperation operation;
+    private GeometryReference? operationTarget;
     public LineInputPanel LineInput { get; } = new();
     public ElementKind? Tool { get; private set; }
     public ElementKind ActivePathKind { get; private set; } = ElementKind.Wire;
@@ -49,7 +56,13 @@ public sealed class DrawingCanvas : Decorator
         session.Changed += InvalidateVisual;
         Child = LineInput;
         LineInput.Edited += () => { UpdateGeometryInput(); InvalidateVisual(); };
-        LineInput.Confirm += () => { if (Tool == ElementKind.Wire) CommitWireParameter(); else CommitGeometry(); };
+        LineInput.Confirm += () =>
+        {
+            if (Tool == ElementKind.Wire) CommitWireParameter();
+            else if (Tool == ElementKind.Polyline) CommitPolylineParameter();
+            else if (Tool == ElementKind.Arc) CommitArcParameter();
+            else CommitGeometry();
+        };
         LineInput.Cancelled += EscapeToSelection;
     }
 
@@ -66,6 +79,21 @@ public sealed class DrawingCanvas : Decorator
         Tool = tool;
         if (tool is ElementKind.Line or ElementKind.Wire) ActivePathKind = tool.Value;
         Focus(); InvalidateVisual();
+    }
+    public void BeginSplitSegment()
+    {
+        Cancel(); operation = CanvasOperation.SplitSegment; Tool = null; Focus();
+        Status?.Invoke("Розбиття: клацни внутрішню точку лінії або сегмента полілінії.");
+    }
+    public void BeginTrim()
+    {
+        Cancel(); operation = CanvasOperation.Trim; Tool = null; Focus();
+        Status?.Invoke("Обрізання: клацни частину прямої лінії, яку треба прибрати, потім межу.");
+    }
+    public void BeginExtend()
+    {
+        Cancel(); operation = CanvasOperation.Extend; Tool = null; Focus();
+        Status?.Invoke("Продовження: клацни потрібний кінець прямої лінії, потім межу.");
     }
     public void ActivatePathTool() => SetTool(ActivePathKind);
     public void SetPathKind(ElementKind kind)
@@ -88,8 +116,12 @@ public sealed class DrawingCanvas : Decorator
     {
         var hadFocus = LineInput.IsKeyboardFocusWithin;
         anchor = null; dragStart = null; dragDelta = default; panStart = null;
+        vertexElementId = null; vertexIndex = -1;
         boxStart = null; firstPick = null; hoverPick = null; pendingDimension = null; editingElementId = null;
         wirePoints.Clear();
+        arcPoints.Clear();
+        operation = CanvasOperation.None;
+        operationTarget = null;
         LineInput.IsVisible = false;
         if (hadFocus) Focus();
         InvalidateVisual();
@@ -131,17 +163,25 @@ public sealed class DrawingCanvas : Decorator
 
     private static double Direction(double value) => value < 0 ? -1 : 1;
     private bool HasGeometryInput => Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle;
-    private bool HasParameterInput => HasGeometryInput || Tool == ElementKind.Wire && wirePoints.Count > 0;
+    private bool HasParameterInput => HasGeometryInput ||
+        Tool is ElementKind.Wire or ElementKind.Polyline && wirePoints.Count > 0 ||
+        Tool == ElementKind.Arc && arcPoints.Count == 1;
 
     private bool FromInput(object? source) => source is Visual v && (v == LineInput || v.GetVisualAncestors().Contains(LineInput));
 
     private void UpdateGeometryInput()
     {
         if (anchor is not { } a || !HasParameterInput) return;
-        var end = Tool == ElementKind.Wire ? WireInputEnd(a, cursor) : EndPoint(a, cursor);
+        var end = Tool switch
+        {
+            ElementKind.Wire => WireInputEnd(a, cursor),
+            ElementKind.Polyline => PolylineInputEnd(a, cursor),
+            _ => EndPoint(a, cursor)
+        };
         var delta = end - a;
         if (Tool == ElementKind.Rectangle) LineInput.UpdateLive(Math.Abs(delta.X), Math.Abs(delta.Y));
         else if (Tool == ElementKind.Circle) LineInput.UpdateLive(delta.Length, delta.Length * 2);
+        else if (Tool == ElementKind.Arc) LineInput.UpdateLive(delta.Length, 90);
         else LineInput.UpdateLive(delta.Length, Geometry.Angle(delta));
         if (!LineInput.IsKeyboardFocusWithin)
         {
@@ -284,6 +324,95 @@ public sealed class DrawingCanvas : Decorator
         return Geometry.Polar(start, length, angle);
     }
 
+    private PointMm PolylineInputEnd(PointMm start, PointMm end)
+    {
+        var delta = end - start;
+        var angle = LineInput.SecondValue ?? (AngleSnapStep > 0 ? SnapAngle(delta) : Geometry.Angle(delta));
+        var length = LineInput.FirstValue ?? delta.Length;
+        if (length <= 1e-9) return start;
+        return Geometry.Polar(start, length, angle);
+    }
+
+    private PointMm[] PreviewPolyline()
+    {
+        if (wirePoints.Count == 0) return [];
+        var end = LineInput.HasInput ? PolylineInputEnd(wirePoints[^1], cursor) : cursor;
+        return end == wirePoints[^1] ? [.. wirePoints] : [.. wirePoints, end];
+    }
+
+    private void AddPolylinePoint(GeometryPick pick, bool finish)
+    {
+        if (wirePoints.Count == 0)
+        {
+            wirePoints.Add(pick.Point); anchor = pick.Point;
+            LineInput.Begin(ElementKind.Polyline); UpdateGeometryInput();
+            Status?.Invoke("Полілінія: клік — вершина, число — довжина сегмента, подвійний клік або Enter — завершити.");
+            return;
+        }
+        if (LineInput.HasInput && !LineInput.Valid) { Status?.Invoke("Виправ довжину або кут сегмента."); return; }
+        var target = LineInput.HasInput ? PolylineInputEnd(wirePoints[^1], pick.Point) : pick.Point;
+        if (target != wirePoints[^1]) wirePoints.Add(target);
+        anchor = wirePoints[^1];
+        if (finish) CommitPolyline();
+        else { LineInput.Begin(ElementKind.Polyline); UpdateGeometryInput(); Focus(); }
+    }
+
+    private void CommitPolylineParameter()
+    {
+        if (!LineInput.Valid) return;
+        if (!LineInput.HasInput) { CommitPolyline(); return; }
+        var target = PolylineInputEnd(wirePoints[^1], cursor);
+        if (target == wirePoints[^1]) return;
+        wirePoints.Add(target); anchor = target;
+        LineInput.Begin(ElementKind.Polyline); UpdateGeometryInput(); Focus();
+        Status?.Invoke("Точний сегмент полілінії додано. Enter із порожніми полями завершує побудову.");
+        InvalidateVisual();
+    }
+
+    private void CommitPolyline()
+    {
+        if (wirePoints.Count < 2) return;
+        session.Add(new(Guid.NewGuid(), ElementKind.Polyline, wirePoints[0], wirePoints[^1]) { Points = [.. wirePoints] });
+        Cancel(); Status?.Invoke("Полілінію додано.");
+    }
+
+    private void AddArcPoint(PointMm point)
+    {
+        if (arcPoints.Count == 0)
+        {
+            arcPoints.Add(point); anchor = point;
+            LineInput.Begin(ElementKind.Arc); UpdateGeometryInput();
+            Status?.Invoke("Дуга: обери проміжну точку або введи радіус → Tab → кут дуги → Enter."); return;
+        }
+        if (arcPoints.Count == 1 && LineInput.HasInput) { CommitArcParameter(); return; }
+        if (point == arcPoints[^1]) return;
+        if (arcPoints.Count == 1)
+        {
+            arcPoints.Add(point); Status?.Invoke("Дуга: обери кінцеву точку."); return;
+        }
+        try
+        {
+            session.Add(ArcGeometry.FromThreePoints(Guid.NewGuid(), arcPoints[0], arcPoints[1], point));
+            Cancel(); Status?.Invoke("Дугу додано за трьома точками.");
+        }
+        catch (InvalidDataException ex) { Status?.Invoke(ex.Message); }
+    }
+
+    private void CommitArcParameter()
+    {
+        if (arcPoints.Count != 1 || !LineInput.Valid) return;
+        if (LineInput.FirstValue is not { } radius || LineInput.SecondValue is not { } sweep)
+        { Status?.Invoke("Для точної дуги введи радіус і кут дуги."); return; }
+        try
+        {
+            var centre = arcPoints[0];
+            var start = Geometry.Polar(centre, radius, (cursor - centre).Length > 1e-9 ? Geometry.Angle(cursor - centre) : 0);
+            session.Add(new(Guid.NewGuid(), ElementKind.Arc, centre, start) { ArcSweepDegrees = sweep });
+            Cancel(); Status?.Invoke("Дугу додано за радіусом і кутом.");
+        }
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentOutOfRangeException) { Status?.Invoke(ex.Message); }
+    }
+
     private static double CardinalAngle(PointMm delta) => Math.Abs(delta.X) >= Math.Abs(delta.Y)
         ? delta.X < 0 ? 180 : 0
         : delta.Y < 0 ? 90 : 270;
@@ -417,7 +546,14 @@ public sealed class DrawingCanvas : Decorator
                 for (var y = Math.Max(0, Math.Ceiling(min.Y / step) * step); y <= Math.Min(doc.HeightMm, max.Y); y += step)
                     context.DrawEllipse(Brushes.LightSlateGray, null, Screen(new(x, y)), .65, .65);
         }
-        var displayed = dragStart is not null ? session.PreviewMove(dragDelta) : doc.Elements;
+        DrawingElement[] displayed;
+        try
+        {
+            displayed = vertexElementId is { } vertexOwner
+                ? session.PreviewMoveVertex(vertexOwner, vertexIndex, vertexTarget)
+                : dragStart is not null ? session.PreviewMove(dragDelta) : doc.Elements;
+        }
+        catch (InvalidDataException) { displayed = doc.Elements; }
         foreach (var element in displayed)
         {
             if (element.Id == editingElementId) continue;
@@ -425,7 +561,7 @@ public sealed class DrawingCanvas : Decorator
             var brush = selected ? Brushes.RoyalBlue : ElementBrush(element.Kind);
             Draw(context, element, brush);
         }
-        if (anchor is { } a && Tool is { } kind && kind is not (ElementKind.Wire or ElementKind.Symbol))
+        if (anchor is { } a && Tool is { } kind && kind is not (ElementKind.Wire or ElementKind.Polyline or ElementKind.Arc or ElementKind.Symbol))
             Draw(context, new(Guid.Empty, kind, a, EndPoint(a, cursor)), Brushes.Teal);
         var previewWire = PreviewWire();
         if (Tool == ElementKind.Wire && previewWire.Length >= 2)
@@ -435,6 +571,30 @@ public sealed class DrawingCanvas : Decorator
         {
             var end = LineInput.HasInput ? WireInputEnd(wirePoints[^1], cursor) : previewWire[^1];
             DrawLiveGeometryValues(context, Screen(end), ElementKind.Wire, end - wirePoints[^1]);
+        }
+        var previewPolyline = PreviewPolyline();
+        if (Tool == ElementKind.Polyline && previewPolyline.Length >= 2)
+            for (var i = 1; i < previewPolyline.Length; i++)
+                context.DrawLine(new Pen(Brushes.Teal, Math.Max(1, .25 * scale)), Screen(previewPolyline[i - 1]), Screen(previewPolyline[i]));
+        if (Tool == ElementKind.Polyline && wirePoints.Count > 0 && !LineInput.IsVisible && previewPolyline.Length > 1)
+            DrawLiveGeometryValues(context, Screen(previewPolyline[^1]), ElementKind.Polyline, previewPolyline[^1] - wirePoints[^1]);
+        if (Tool == ElementKind.Arc && arcPoints.Count == 1)
+        {
+            if (LineInput.FirstValue is { } radius && LineInput.SecondValue is { } sweep && LineInput.Valid)
+            {
+                try
+                {
+                    var start = Geometry.Polar(arcPoints[0], radius, (cursor - arcPoints[0]).Length > 1e-9 ? Geometry.Angle(cursor - arcPoints[0]) : 0);
+                    Draw(context, new(Guid.Empty, ElementKind.Arc, arcPoints[0], start) { ArcSweepDegrees = sweep }, Brushes.Teal);
+                }
+                catch (ArgumentOutOfRangeException) { }
+            }
+            else context.DrawLine(new Pen(Brushes.Teal, 1), Screen(arcPoints[0]), Screen(cursor));
+        }
+        else if (Tool == ElementKind.Arc && arcPoints.Count == 2)
+        {
+            try { Draw(context, ArcGeometry.FromThreePoints(Guid.Empty, arcPoints[0], arcPoints[1], cursor), Brushes.Teal); }
+            catch (InvalidDataException) { }
         }
         if (anchor is { } geometryStart && Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle && !LineInput.IsVisible)
         {
@@ -473,6 +633,7 @@ public sealed class DrawingCanvas : Decorator
             ElementKind.Rectangle => $"Ш {Math.Abs(delta.X):0.###} мм    В {Math.Abs(delta.Y):0.###} мм",
             ElementKind.Circle => $"R {delta.Length:0.###} мм    ⌀ {delta.Length * 2:0.###} мм",
             ElementKind.Wire => $"L {delta.Length:0.###} мм    ∠ {Geometry.Angle(delta):0.###}°",
+            ElementKind.Polyline => $"L {delta.Length:0.###} мм    ∠ {Geometry.Angle(delta):0.###}°",
             _ => ""
         };
         var text = new FormattedText(value, CultureInfo.CurrentCulture,
@@ -492,6 +653,13 @@ public sealed class DrawingCanvas : Decorator
             case ElementKind.Line: ctx.DrawLine(pen, a, b); break;
             case ElementKind.Wire:
                 for (var i = 1; i < e.Points!.Length; i++) ctx.DrawLine(pen, Screen(e.Points[i - 1]), Screen(e.Points[i]));
+                break;
+            case ElementKind.Polyline:
+                for (var i = 1; i < e.Points!.Length; i++) ctx.DrawLine(pen, Screen(e.Points[i - 1]), Screen(e.Points[i]));
+                break;
+            case ElementKind.Arc:
+                var arc = ArcGeometry.Sample(e, Math.Max(1, 8 / scale));
+                for (var i = 1; i < arc.Length; i++) ctx.DrawLine(pen, Screen(arc[i - 1]), Screen(arc[i]));
                 break;
             case ElementKind.Rectangle:
                 ctx.DrawRectangle(null, pen, new Rect(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y)));
@@ -604,12 +772,62 @@ public sealed class DrawingCanvas : Decorator
         }
         if (point.Properties.IsRightButtonPressed) { Cancel(); return; }
         if (!point.Properties.IsLeftButtonPressed) return;
-        var raw = World(point.Position); cursor = Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Dimension or ElementKind.Wire ? Pick(raw).Point : Snap(raw);
+        var raw = World(point.Position); cursor = Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Dimension or ElementKind.Wire or ElementKind.Polyline or ElementKind.Arc ? Pick(raw).Point : Snap(raw);
+        if (operation == CanvasOperation.SplitSegment)
+        {
+            var pick = AssociativeDimensions.Pick(session.Document.Elements, raw, 8 / scale);
+            try
+            {
+                if (pick.Reference is not { Kind: ReferenceKind.Edge } reference)
+                    throw new InvalidDataException("Обери внутрішню точку лінії або сегмента полілінії.");
+                session.Apply(SegmentEditing.Split(session.Document.Elements, reference));
+                Cancel(); Status?.Invoke("Сегмент розбито.");
+            }
+            catch (InvalidDataException ex) { Status?.Invoke(ex.Message); }
+            InvalidateVisual(); e.Handled = true; return;
+        }
+        if (operation is CanvasOperation.Trim or CanvasOperation.Extend)
+        {
+            var pick = AssociativeDimensions.Pick(session.Document.Elements, raw, 8 / scale);
+            try
+            {
+                var reference = AsLineEdge(pick.Reference);
+                if (reference is null)
+                    throw new InvalidDataException("Обери пряму лінію або межу.");
+                if (operationTarget is null)
+                {
+                    var owner = session.Document.Elements.Single(item => item.Id == reference.ElementId);
+                    if (owner.Kind != ElementKind.Line) throw new InvalidDataException("Ціль має бути прямою лінією.");
+                    operationTarget = reference;
+                    Status?.Invoke(operation == CanvasOperation.Trim
+                        ? "Тепер клацни пряму межу обрізання."
+                        : "Тепер клацни пряму межу продовження.");
+                }
+                else
+                {
+                    var wasTrim = operation == CanvasOperation.Trim;
+                    var changed = wasTrim
+                        ? SegmentEditing.Trim(session.Document.Elements, operationTarget, reference)
+                        : SegmentEditing.Extend(session.Document.Elements, operationTarget, reference);
+                    session.Apply(changed); Cancel();
+                    Status?.Invoke(wasTrim ? "Лінію обрізано." : "Лінію продовжено.");
+                }
+            }
+            catch (InvalidDataException ex) { Status?.Invoke(ex.Message); }
+            InvalidateVisual(); e.Handled = true; return;
+        }
         if (Tool == ElementKind.Wire)
         {
             var pick = Pick(raw); AddWirePoint(pick, e.ClickCount >= 2);
             InvalidateVisual(); e.Handled = true; return;
         }
+        if (Tool == ElementKind.Polyline)
+        {
+            var pick = Pick(raw); AddPolylinePoint(pick, e.ClickCount >= 2);
+            InvalidateVisual(); e.Handled = true; return;
+        }
+        if (Tool == ElementKind.Arc)
+        { AddArcPoint(Pick(raw).Point); InvalidateVisual(); e.Handled = true; return; }
         if (Tool == ElementKind.Symbol)
         { AddSymbol(Snap(raw)); InvalidateVisual(); e.Handled = true; return; }
         if (Tool == ElementKind.Junction)
@@ -637,6 +855,16 @@ public sealed class DrawingCanvas : Decorator
         }
         else
         {
+            var vertex = session.Document.Elements.Where(item => session.Selection.Contains(item.Id) && item.Kind == ElementKind.Polyline)
+                .SelectMany(item => item.Points!.Select((p, index) => (Element: item, Point: p, Index: index)))
+                .Where(item => (item.Point - raw).Length <= 6 / scale)
+                .OrderBy(item => (item.Point - raw).Length).FirstOrDefault();
+            if (vertex.Element is not null)
+            {
+                vertexElementId = vertex.Element.Id; vertexIndex = vertex.Index; vertexTarget = vertex.Point;
+                e.Pointer.Capture(this); Status?.Invoke($"Переміщення вершини {vertex.Index + 1} полілінії.");
+                InvalidateVisual(); e.Handled = true; return;
+            }
             var hit = session.Document.Elements.LastOrDefault(el => el.Hit(raw, 6 / scale));
             var additive = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
             if (hit is null)
@@ -672,6 +900,16 @@ public sealed class DrawingCanvas : Decorator
         InvalidateVisual(); e.Handled = true;
     }
 
+    private GeometryReference? AsLineEdge(GeometryReference? reference)
+    {
+        if (reference?.Kind == ReferenceKind.Edge) return reference;
+        if (reference is not { Kind: ReferenceKind.Vertex, Index: 0 or 1 }) return null;
+        var owner = session.Document.Elements.FirstOrDefault(item => item.Id == reference.ElementId);
+        return owner?.Kind == ElementKind.Line
+            ? new GeometryReference(owner.Id, ReferenceKind.Edge, 0, reference.Index)
+            : null;
+    }
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
@@ -679,13 +917,19 @@ public sealed class DrawingCanvas : Decorator
         var p = e.GetPosition(this);
         if (panStart is { } previous) { origin += p - previous; panStart = p; }
         var raw = World(p);
-        hoverPick = Tool is ElementKind.Dimension or ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire ? Pick(raw) :
+        hoverPick = Tool is ElementKind.Dimension or ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire or ElementKind.Polyline or ElementKind.Arc || operation != CanvasOperation.None ? Pick(raw) :
             Tool == ElementKind.Junction ? new(ConnectionSnap.Pick(session.Document.Elements, raw, 8 / scale, Snap(raw)), null) : null;
         cursor = hoverPick?.Point ?? Snap(raw);
         if (boxStart is not null) boxEnd = raw;
         if (dragStart is { } start) dragDelta = cursor - start;
+        if (vertexElementId is not null) vertexTarget = Snap(raw);
         PlaceDimension(); UpdateGeometryInput();
-        var details = anchor is { } a ? GeometryStatus(a, Tool == ElementKind.Wire ? WireInputEnd(a, cursor) : EndPoint(a, cursor)) : "";
+        var details = anchor is { } a ? GeometryStatus(a, Tool switch
+        {
+            ElementKind.Wire => WireInputEnd(a, cursor),
+            ElementKind.Polyline => PolylineInputEnd(a, cursor),
+            _ => EndPoint(a, cursor)
+        }) : "";
         Status?.Invoke($"X {cursor.X:0.###} мм   Y {cursor.Y:0.###} мм{details}");
         InvalidateVisual();
     }
@@ -699,6 +943,7 @@ public sealed class DrawingCanvas : Decorator
             ElementKind.Rectangle => $"   Ширина {Math.Abs(delta.X):0.###} мм   Висота {Math.Abs(delta.Y):0.###} мм",
             ElementKind.Circle => $"   Радіус {delta.Length:0.###} мм   Діаметр {delta.Length * 2:0.###} мм",
             ElementKind.Wire => $"   Сегмент {delta.Length:0.###} мм   Кут {Geometry.Angle(delta):0.###}°",
+            ElementKind.Polyline => $"   Сегмент {delta.Length:0.###} мм   Кут {Geometry.Angle(delta):0.###}°",
             _ => $"   Довжина {delta.Length:0.###} мм"
         };
     }
@@ -717,6 +962,12 @@ public sealed class DrawingCanvas : Decorator
         {
             var delta = dragDelta; dragStart = null; dragDelta = default; session.Move(delta);
         }
+        if (vertexElementId is { } vertexOwner && e.InitialPressMouseButton == MouseButton.Left)
+        {
+            try { session.MoveVertex(vertexOwner, vertexIndex, vertexTarget); Status?.Invoke("Вершину полілінії переміщено."); }
+            catch (InvalidDataException ex) { Status?.Invoke(ex.Message); }
+            vertexElementId = null; vertexIndex = -1;
+        }
         panStart = null;
         e.Pointer.Capture(null);
         InvalidateVisual();
@@ -725,7 +976,8 @@ public sealed class DrawingCanvas : Decorator
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);
-        dragStart = null; dragDelta = default; panStart = null; boxStart = null; InvalidateVisual();
+        dragStart = null; dragDelta = default; vertexElementId = null; vertexIndex = -1;
+        panStart = null; boxStart = null; InvalidateVisual();
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -756,6 +1008,8 @@ public sealed class DrawingCanvas : Decorator
         {
             if (HasGeometryInput) CommitGeometry();
             else if (Tool == ElementKind.Wire) CommitWireParameter();
+            else if (Tool == ElementKind.Polyline) CommitPolylineParameter();
+            else if (Tool == ElementKind.Arc) CommitArcParameter();
             else if (Tool == ElementKind.Dimension)
             {
                 if (pendingDimension is not null) { session.Add(pendingDimension); Cancel(); }
@@ -772,7 +1026,7 @@ public sealed class DrawingCanvas : Decorator
         }
         if (e.Key == Key.Escape) { EscapeToSelection(); e.Handled = true; }
         else if (e.Key == Key.Delete) { Cancel(); session.Delete(); e.Handled = true; }
-        else if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.L or Key.C or Key.R or Key.D)
+        else if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.L or Key.C or Key.R or Key.D or Key.P or Key.A)
         {
             switch (e.Key)
             {
@@ -785,6 +1039,8 @@ public sealed class DrawingCanvas : Decorator
                 case Key.C: SetTool(ElementKind.Circle); Status?.Invoke("Коло (C): задай центр."); break;
                 case Key.R: SetTool(ElementKind.Rectangle); Status?.Invoke("Прямокутник (R): задай перший кут."); break;
                 case Key.D: SetTool(ElementKind.Dimension); Status?.Invoke("Розмір (D): обери дві опорні геометрії."); break;
+                case Key.P: SetTool(ElementKind.Polyline); Status?.Invoke("Полілінія (P): задай першу вершину."); break;
+                case Key.A: SetTool(ElementKind.Arc); Status?.Invoke("Дуга (A): задай початкову точку."); break;
             }
             e.Handled = true;
         }

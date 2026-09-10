@@ -43,6 +43,61 @@ Check("Hit testing segments does not include infinite line extensions", () =>
     Assert(Line().Hit(new(5, .2), .5)); Assert(!Line().Hit(new(20, 0), .5));
     Assert(new DrawingElement(Guid.NewGuid(), ElementKind.Circle, new(0, 0), new(5, 0)).Hit(new(0, 5), .1));
 });
+Check("Three-point arcs preserve the through point and support hit testing", () =>
+{
+    var arc = ArcGeometry.FromThreePoints(Guid.NewGuid(), new(0, 0), new(5, -5), new(10, 0));
+    Assert(arc.Kind == ElementKind.Arc); Near(arc.A.X, 5); Near(arc.A.Y, 0); Near(arc.LengthMm, 5);
+    Near(arc.ArcSweepDegrees, -180);
+    var middle = ArcGeometry.PointAt(arc, .5); Near(middle.X, 5); Near(middle.Y, -5);
+    Assert(arc.Hit(new(5, -5.1), .2) && !arc.Hit(new(5, 5), .2));
+    Assert(new SelectionBox(-1, -6, 11, 1).Matches(arc, false));
+    Reject(() => ArcGeometry.FromThreePoints(Guid.NewGuid(), new(0, 0), new(5, 0), new(10, 0)));
+});
+Check("Polylines validate, move, rotate and expose segment references", () =>
+{
+    var polyline = new DrawingElement(Guid.NewGuid(), ElementKind.Polyline, new(0, 0), new(10, 10))
+        { Points = [new(0, 0), new(10, 0), new(10, 10)] };
+    new DrawingDocument { Elements = [polyline] }.Validate();
+    Assert(AssociativeDimensions.Edges(polyline).Length == 2 && polyline.Hit(new(10, 5), .1));
+    var s = new EditorSession(); s.Add(polyline); s.Select(polyline, false); s.Move(new(5, 5));
+    Assert(s.Document.Elements[0].Points!.SequenceEqual([new PointMm(5, 5), new(15, 5), new(15, 15)]));
+    s.RotateSelection90(); Assert(s.Document.Elements[0].Points!.Length == 3);
+    Reject(() => new DrawingDocument { Elements = [polyline with { Points = [new(0, 0), new(0, 0)] }] }.Validate());
+});
+Check("Splitting lines and polyline segments preserves associative references", () =>
+{
+    var line = Line();
+    var dimension = new DrawingElement(Guid.NewGuid(), ElementKind.Dimension, line.A, line.B)
+    {
+        StartReference = new(line.Id, ReferenceKind.Vertex, 0), EndReference = new(line.Id, ReferenceKind.Vertex, 1)
+    };
+    var splitLine = SegmentEditing.Split([line, dimension], new(line.Id, ReferenceKind.Edge, 0, .4));
+    Assert(splitLine.Count(e => e.Kind == ElementKind.Line) == 2);
+    var resolved = AssociativeDimensions.ResolveAll(splitLine);
+    Near(resolved.Single(e => e.Kind == ElementKind.Dimension).LengthMm, 10);
+
+    var polyline = new DrawingElement(Guid.NewGuid(), ElementKind.Polyline, new(0, 0), new(10, 10))
+        { Points = [new(0, 0), new(10, 0), new(10, 10)] };
+    var polyDimension = dimension with { Id = Guid.NewGuid(), StartReference = new(polyline.Id, ReferenceKind.Vertex, 0), EndReference = new(polyline.Id, ReferenceKind.Vertex, 2) };
+    var splitPolyline = SegmentEditing.Split([polyline, polyDimension], new(polyline.Id, ReferenceKind.Edge, 0, .5));
+    Assert(splitPolyline[0].Points!.Length == 4 && splitPolyline[1].EndReference?.Index == 3);
+    Reject(() => SegmentEditing.Split([line], new(line.Id, ReferenceKind.Edge, 0, 0)));
+});
+Check("Trim and extend change the selected line end at a straight boundary", () =>
+{
+    var target = Line();
+    var boundary = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(4, -5), new(4, 5));
+    var trimmed = SegmentEditing.Trim([target, boundary], new(target.Id, ReferenceKind.Edge, 0, .2),
+        new(boundary.Id, ReferenceKind.Edge, 0, .5));
+    Assert(trimmed[0].A == new PointMm(4, 0) && trimmed[0].B == new PointMm(10, 0));
+
+    var shortLine = target with { B = new(3, 0) };
+    var extended = SegmentEditing.Extend([shortLine, boundary], new(shortLine.Id, ReferenceKind.Edge, 0, .9),
+        new(boundary.Id, ReferenceKind.Edge, 0, .5));
+    Assert(extended[0].A == new PointMm(0, 0) && extended[0].B == new PointMm(4, 0));
+    Reject(() => SegmentEditing.Extend([shortLine, boundary], new(shortLine.Id, ReferenceKind.Edge, 0, .1),
+        new(boundary.Id, ReferenceKind.Edge, 0, .5)));
+});
 Check("Connection nodes snap to exact line intersections", () =>
 {
     var a = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(0, 0), new(10, 10));
@@ -222,7 +277,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 8 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 9 && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -306,7 +361,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 8);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 9);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -339,7 +394,7 @@ Check("Driving aligned dimension resizes a line and connected geometry atomicall
     Near(s.Document.Elements[3].DimensionValueMm, 24.75);
     var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path);
-    Assert(reopened.SchemaVersion == 8 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Assert(reopened.SchemaVersion == 9 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
     Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
     s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
 });
@@ -452,7 +507,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 8); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 9); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -492,7 +547,7 @@ Check("One path tool switches between electrical and graphical lines", () =>
     liveCanvas.EscapeToSelection();
     Assert(liveCanvas.Tool is null && liveCanvas.ActivePathKind == ElementKind.Line);
 });
-Check("L C R D keyboard shortcuts activate drawing tools", () =>
+Check("L C R D P A keyboard shortcuts activate drawing tools", () =>
 {
     void Press(PhysicalKey key)
     {
@@ -504,6 +559,8 @@ Check("L C R D keyboard shortcuts activate drawing tools", () =>
     Press(PhysicalKey.C); Assert(liveCanvas.Tool == ElementKind.Circle);
     Press(PhysicalKey.R); Assert(liveCanvas.Tool == ElementKind.Rectangle);
     Press(PhysicalKey.D); Assert(liveCanvas.Tool == ElementKind.Dimension);
+    Press(PhysicalKey.P); Assert(liveCanvas.Tool == ElementKind.Polyline);
+    Press(PhysicalKey.A); Assert(liveCanvas.Tool == ElementKind.Arc);
     liveCanvas.EscapeToSelection();
 });
 Check("Floating input: type length, Tab, angle and Enter", () =>
@@ -615,6 +672,76 @@ Check("Pointer tool builds an orthogonal multi-segment wire", () =>
     var wire = interactive.Document.Elements.Single();
     Assert(wire.Kind == ElementKind.Wire);
     Assert(wire.Points!.SequenceEqual([new PointMm(10, 10), new(50, 10), new(50, 30)]));
+});
+Check("Pointer tool creates a free and exact-segment polyline", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Polyline);
+    Tap(60, 60); liveWindow.MouseMove(new(120, 60)); Tap(120, 60);
+    liveWindow.MouseMove(new(120, 120)); Tap(120, 120);
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var free = interactive.Document.Elements.Single();
+    Assert(free.Kind == ElementKind.Polyline && free.Points!.SequenceEqual([new PointMm(10, 10), new(35, 10), new(35, 35)]));
+
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Polyline); Tap(60, 60); liveWindow.MouseMove(new(200, 100));
+    liveWindow.KeyTextInput("12.5");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("25");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var exact = interactive.Document.Elements.Single();
+    Near((exact.Points![1] - exact.Points[0]).Length, 12.5); Near(Geometry.Angle(exact.Points[1] - exact.Points[0]), 25);
+});
+Check("Selected polyline vertices drag as one undoable edit", () =>
+{
+    var polyline = new DrawingElement(Guid.NewGuid(), ElementKind.Polyline, new(10, 10), new(30, 30))
+        { Points = [new(10, 10), new(30, 10), new(30, 30)] };
+    interactive.Load(new() { Elements = [polyline] }); interactive.Select(polyline, false); liveCanvas.SetTool(null);
+    liveWindow.MouseDown(new(60, 60), MouseButton.Left); liveWindow.MouseMove(new(84, 84)); liveWindow.MouseUp(new(84, 84), MouseButton.Left);
+    Assert(interactive.Document.Elements[0].Points![0] == new PointMm(20, 20));
+    interactive.Undo(); Assert(interactive.Document.Elements[0].Points![0] == new PointMm(10, 10));
+});
+Check("Split command divides a line at the clicked point", () =>
+{
+    var line = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(10, 10), new(50, 10));
+    interactive.Load(new() { Elements = [line] }); liveCanvas.BeginSplitSegment(); Tap(108, 60);
+    var pieces = interactive.Document.Elements.Where(e => e.Kind == ElementKind.Line).ToArray();
+    Assert(pieces.Length == 2); Near(pieces[0].LengthMm, 20); Near(pieces[1].LengthMm, 20);
+    interactive.Undo(); Assert(interactive.Document.Elements.Single() == line);
+});
+Check("Trim and extend commands use two clicked straight segments", () =>
+{
+    var target = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(10, 10), new(50, 10));
+    var boundary = new DrawingElement(Guid.NewGuid(), ElementKind.Line, new(30, 0), new(30, 20));
+    interactive.Load(new() { Elements = [target, boundary] }); liveCanvas.BeginTrim();
+    Tap(72, 60); Tap(108, 72);
+    Assert(interactive.Document.Elements[0].A == new PointMm(30, 10));
+
+    var shortLine = target with { B = new(20, 10) };
+    interactive.Load(new() { Elements = [shortLine, boundary] }); liveCanvas.BeginExtend();
+    Tap(82, 60); Tap(108, 72);
+    Assert(interactive.Document.Elements[0].B == new PointMm(30, 10));
+});
+Check("Pointer tool creates a three-point arc and stores it in project format", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Arc);
+    Tap(60, 108); Tap(108, 60); Tap(156, 108);
+    var arc = interactive.Document.Elements.Single();
+    Assert(arc.Kind == ElementKind.Arc); Near(arc.LengthMm, 20); Near(Math.Abs(arc.ArcSweepDegrees), 180);
+    var path = Path.Combine(output, "arc-polyline.ecad"); ProjectFile.Save(path, interactive.Document);
+    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 9 && reopened.Elements.Single().Kind == ElementKind.Arc);
+    using var frame = liveWindow.CaptureRenderedFrame() ?? throw new Exception("No arc render");
+    frame.Save(Path.Combine(output, "arc-tool.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+});
+Check("Arc supports exact radius and sweep through the shared input", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Arc); Tap(60, 60); liveWindow.MouseMove(new(140, 60));
+    liveWindow.KeyTextInput("12.5");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("-135");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var arc = interactive.Document.Elements.Single();
+    Assert(arc.Kind == ElementKind.Arc && arc.A == new PointMm(10, 10));
+    Near(arc.LengthMm, 12.5); Near(arc.ArcSweepDegrees, -135);
 });
 Check("Wire supports consecutive exact segments at arbitrary angles", () =>
 {
@@ -763,6 +890,31 @@ Check("Property panel turns an associative dimension into a driving constraint",
         .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
     Near(interactive.Document.Elements[0].LengthMm, 27.5);
     Assert(interactive.Document.Elements[1].DimensionMode == DimensionMode.Driving);
+    propertyWindow.Close();
+});
+Check("Property panel edits polyline vertices and arc parameters", () =>
+{
+    var polyline = new DrawingElement(Guid.NewGuid(), ElementKind.Polyline, new(0, 0), new(10, 10))
+        { Points = [new(0, 0), new(10, 0), new(10, 10)] };
+    interactive.Load(new() { Elements = [polyline] }); interactive.Select(polyline, false);
+    var properties = new PropertyPanel(interactive, _ => { });
+    var propertyWindow = new Window { Width = 320, Height = 700, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    properties.GetVisualDescendants().OfType<TextBox>().Single(x => x.Name == "PropertyVertices").Text = "0; 0\n15,5; 0\n15,5; 8";
+    properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Near(interactive.Document.Elements.Single().Points![1].X, 15.5);
+    propertyWindow.Close();
+
+    var arc = ArcGeometry.FromThreePoints(Guid.NewGuid(), new(0, 0), new(5, -5), new(10, 0));
+    interactive.Load(new() { Elements = [arc] }); interactive.Select(arc, false);
+    properties = new PropertyPanel(interactive, _ => { }); propertyWindow = new Window { Width = 320, Height = 700, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    properties.GetVisualDescendants().OfType<TextBox>().Single(x => x.Name == "PropertyRadius").Text = "8";
+    properties.GetVisualDescendants().OfType<TextBox>().Single(x => x.Name == "PropertySweep").Text = "90";
+    properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Near(interactive.Document.Elements.Single().LengthMm, 8); Near(interactive.Document.Elements.Single().ArcSweepDegrees, 90);
     propertyWindow.Close();
 });
 liveWindow.Close();

@@ -89,6 +89,10 @@ public sealed class LineInputPanel : Border
                 (!angleLocked || Angle is > 0 and <= 10000),
             ElementKind.Wire => (!lengthLocked || Length is > 0 and <= 10000) &&
                 (!angleLocked || Angle is >= -36000 and <= 36000),
+            ElementKind.Polyline => (!lengthLocked || Length is > 0 and <= 10000) &&
+                (!angleLocked || Angle is >= -36000 and <= 36000),
+            ElementKind.Arc => (!lengthLocked || Length is > 0 and <= 5000) &&
+                (!angleLocked || Angle is > -360 and < 360 && Math.Abs(Angle.Value) > 1e-7),
             _ => false
         };
         BorderBrush = Valid ? Brushes.Teal : Brushes.IndianRed;
@@ -98,6 +102,8 @@ public sealed class LineInputPanel : Border
             ElementKind.Rectangle => "Ширина й висота: 0…10000 мм (>0).",
             ElementKind.Circle => "Радіус або діаметр має бути більшим за 0.",
             ElementKind.Wire => "Довжина: 0…10000 мм (>0). Кут: число.",
+            ElementKind.Polyline => "Довжина: 0…10000 мм (>0). Кут: число.",
+            ElementKind.Arc => "Радіус має бути >0; кут дуги — від -360° до 360° без нуля.",
             _ => "Некоректне значення."
         };
     }
@@ -151,7 +157,7 @@ public sealed class LineInputPanel : Border
 
     private void Configure(ElementKind kind)
     {
-        if (kind is not (ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire))
+        if (kind is not (ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire or ElementKind.Polyline or ElementKind.Arc))
             throw new ArgumentOutOfRangeException(nameof(kind));
         mode = kind;
         (firstLabel.Text, secondLabel.Text) = kind switch
@@ -160,6 +166,8 @@ public sealed class LineInputPanel : Border
             ElementKind.Rectangle => ("Ширина, мм", "Висота, мм"),
             ElementKind.Circle => ("Радіус, мм", "Діаметр, мм"),
             ElementKind.Wire => ("Довжина сегмента, мм", "Кут, °"),
+            ElementKind.Polyline => ("Довжина сегмента, мм", "Кут, °"),
+            ElementKind.Arc => ("Радіус, мм", "Кут дуги, °"),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
     }
