@@ -71,6 +71,8 @@ public sealed class PropertyPanel : Border
         ComboBox? pathKind = null;
         ComboBox? dimensionMode = null;
         ComboBox? dimensionType = null;
+        ComboBox? componentVariant = null;
+        ComboBox? physicalRepresentation = null;
         if (element.Kind is ElementKind.Line or ElementKind.Wire)
         {
             pathKind = new ComboBox
@@ -138,7 +140,52 @@ public sealed class PropertyPanel : Border
                 var definition = SymbolLibrary.Get(session.Document, element.SymbolKey!);
                 Field("LibraryName", "Назва в бібліотеці", definition.Name, true);
                 Field("PinCount", "Кількість контактів", (element.PinOffsets ?? definition.Pins).Length, true);
-                panel.Children.Add(SectionNote("Дані компонента", "Ця секція призначена для опису, номіналів, фізичних габаритів, артикулу та наборів контактів бібліотечного компонента."));
+                panel.Children.Add(new TextBlock { Text = "Варіант пристрою", FontSize = 12, Foreground = Brushes.DimGray });
+                var variantChoices = new[] { new VariantChoice(null, "Без моделі пристрою", null) }
+                    .Concat(ComponentCatalog.Variants(session.Document).Where(item => item.Variant.SymbolKey == element.SymbolKey)
+                        .Select(item => new VariantChoice(item.Variant.Id,
+                            $"{item.Family.Manufacturer ?? item.Library.Name} · {item.Family.Series ?? item.Family.Name} · {item.Variant.Name}", item)))
+                    .ToArray();
+                componentVariant = new ComboBox { Name = "PropertyComponentVariant", ItemsSource = variantChoices };
+                componentVariant.SelectedItem = variantChoices.FirstOrDefault(item => item.Id == element.ComponentVariantId) ?? variantChoices[0];
+                panel.Children.Add(componentVariant);
+                panel.Children.Add(new TextBlock { Text = "Фізичне виконання", FontSize = 12, Foreground = Brushes.DimGray });
+                physicalRepresentation = new ComboBox { Name = "PropertyPhysicalRepresentation" };
+                panel.Children.Add(physicalRepresentation);
+                void UpdatePhysicalChoices()
+                {
+                    var choice = componentVariant.SelectedItem as VariantChoice;
+                    var physicalChoices = choice?.Context?.Variant.PhysicalRepresentations
+                        .Select(item => new PhysicalChoice(item.Id, $"{item.Name} · {Format(item.WidthMm)}×{Format(item.HeightMm)}×{Format(item.DepthMm)} мм"))
+                        .ToArray() ?? [];
+                    physicalRepresentation.ItemsSource = physicalChoices;
+                    physicalRepresentation.SelectedItem = physicalChoices.FirstOrDefault(item => item.Id == element.PhysicalRepresentationId)
+                        ?? physicalChoices.FirstOrDefault();
+                    physicalRepresentation.IsEnabled = physicalChoices.Length > 0;
+                }
+                componentVariant.SelectionChanged += (_, _) => UpdatePhysicalChoices();
+                UpdatePhysicalChoices();
+                var linked = ComponentCatalog.FindVariant(session.Document, element.ComponentVariantId);
+                if (linked is null)
+                    panel.Children.Add(SectionNote("Дані компонента", variantChoices.Length == 1
+                        ? "У документі ще немає сумісних варіантів пристрою. Їх створюватиме редактор бібліотеки 0.14."
+                        : "Обери варіант пристрою та фізичне виконання."));
+                else
+                {
+                    var configuration = string.Join(" · ", linked.Variant.Configuration.Select(value =>
+                    {
+                        var field = linked.DeviceType.ConfigurationFields.First(item => string.Equals(item.Key, value.Key, StringComparison.OrdinalIgnoreCase));
+                        return $"{field.Name}: {value.Value}{(field.Unit is null ? "" : " " + field.Unit)}";
+                    }));
+                    var parameters = string.Join(" · ", ComponentCatalog.EffectiveParameters(linked)
+                        .Select(value => $"{value.Name}: {value.Value}{(value.Unit is null ? "" : " " + value.Unit)}"));
+                    panel.Children.Add(SectionNote("Дані компонента",
+                        $"Бібліотека: {linked.Library.Name}\nТип: {linked.DeviceType.Name}\nСімейство: {linked.Family.Name}\n" +
+                        $"Виробник: {linked.Family.Manufacturer ?? "—"}\nСерія: {linked.Family.Series ?? "—"}\n" +
+                        $"Артикул: {linked.Variant.CatalogNumber ?? "—"}\nНомінал: {linked.Variant.RatingText ?? "—"}\n" +
+                        $"Конфігурація: {(configuration.Length == 0 ? "—" : configuration)}\n" +
+                        $"Параметри: {(parameters.Length == 0 ? "—" : parameters)}\nКонтактів: {linked.Variant.Contacts.Length}"));
+                }
                 break;
             case ElementKind.Junction:
                 Field("X", "X, мм", element.A.X); Field("Y", "Y, мм", element.A.Y);
@@ -173,7 +220,7 @@ public sealed class PropertyPanel : Border
         {
             try
             {
-                Apply(element.Id, fields, pathKind, dimensionType, dimensionMode);
+                Apply(element.Id, fields, pathKind, dimensionType, dimensionMode, componentVariant, physicalRepresentation);
                 report("Властивості об’єкта оновлено.");
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or ArgumentOutOfRangeException)
@@ -193,7 +240,8 @@ public sealed class PropertyPanel : Border
     }
 
     private void Apply(Guid id, Dictionary<string, TextBox> fields, ComboBox? pathKind,
-        ComboBox? dimensionType, ComboBox? dimensionMode)
+        ComboBox? dimensionType, ComboBox? dimensionMode, ComboBox? componentVariant,
+        ComboBox? physicalRepresentation)
     {
         var source = session.Document.Elements.Single(e => e.Id == id);
         var name = fields["Name"].Text?.Trim();
@@ -266,7 +314,13 @@ public sealed class PropertyPanel : Border
             {
                 var tag = fields["DeviceTag"].Text?.Trim();
                 if (string.IsNullOrWhiteSpace(tag)) throw new InvalidDataException("Позиційне позначення не може бути порожнім.");
-                updated = updated with { A = Position(), B = Position(), DeviceTag = tag, RotationDegrees = Number(fields, "Rotation") };
+                var variant = componentVariant?.SelectedItem as VariantChoice;
+                var physical = physicalRepresentation?.SelectedItem as PhysicalChoice;
+                updated = updated with
+                {
+                    A = Position(), B = Position(), DeviceTag = tag, RotationDegrees = Number(fields, "Rotation"),
+                    ComponentVariantId = variant?.Id, PhysicalRepresentationId = variant?.Id is null ? null : physical?.Id
+                };
                 break;
             }
             case ElementKind.Junction:
@@ -353,4 +407,9 @@ public sealed class PropertyPanel : Border
         ElementKind.Dimension => "Розмір", ElementKind.Junction => "Точка з’єднання",
         ElementKind.Text => "Текст", ElementKind.Symbol => "Символ", _ => kind.ToString()
     };
+
+    private sealed record VariantChoice(Guid? Id, string Label, DeviceVariantContext? Context)
+    { public override string ToString() => Label; }
+    private sealed record PhysicalChoice(Guid Id, string Label)
+    { public override string ToString() => Label; }
 }

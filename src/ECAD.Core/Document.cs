@@ -31,6 +31,8 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
     public PointMm[]? PinOffsets { get; init; }
     public SymbolStroke[]? SymbolStrokes { get; init; }
     public Guid? LinkedElementId { get; init; }
+    public Guid? ComponentVariantId { get; init; }
+    public Guid? PhysicalRepresentationId { get; init; }
     public double ArcSweepDegrees { get; init; }
     [JsonIgnore] public double LengthMm => (B - A).Length;
     [JsonIgnore] public double DimensionValueMm => DimensionType switch
@@ -103,15 +105,16 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 9;
+    public int SchemaVersion { get; init; } = 10;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
     public SymbolDefinition[] CustomSymbols { get; init; } = [];
+    public ComponentLibrary[] ComponentLibraries { get; init; } = [];
 
     public void Validate()
     {
-        if (SchemaVersion is < 1 or > 9) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > 10) throw new InvalidDataException("Непідтримувана версія документа.");
         if (!double.IsFinite(WidthMm) || !double.IsFinite(HeightMm) || WidthMm <= 0 || HeightMm <= 0 ||
             WidthMm > 10000 || HeightMm > 10000)
             throw new InvalidDataException("Некоректний розмір аркуша.");
@@ -120,6 +123,8 @@ public sealed record DrawingDocument
         if (CustomSymbols is null || CustomSymbols.Length > 1000 || !ValidCustomSymbols(CustomSymbols))
             throw new InvalidDataException("Некоректна бібліотека власних символів.");
         var symbolKeys = SymbolLibrary.All.Select(d => d.Key).Concat(CustomSymbols.Select(d => d.Key)).ToHashSet();
+        ComponentCatalog.Validate(ComponentLibraries, symbolKeys);
+        var variants = ComponentCatalog.Variants(this).ToDictionary(item => item.Variant.Id);
         var ids = new HashSet<Guid>();
         foreach (var e in Elements)
             if (e is null || e.Id == Guid.Empty || !ids.Add(e.Id) || !Enum.IsDefined(e.Kind) ||
@@ -138,6 +143,7 @@ public sealed record DrawingDocument
                 !double.IsFinite(e.ArcSweepDegrees) || !ValidArc(e) ||
                 (e.Kind == ElementKind.Text ? string.IsNullOrWhiteSpace(e.Text) || e.Text.Length > 4096 : e.Text is not null) ||
                 !ValidPath(e) || !ValidSymbol(e, symbolKeys) ||
+                !ValidComponentLink(e, variants) ||
                 (e.LinkedElementId is not null && (e.Kind != ElementKind.Text || e.LinkedElementId == Guid.Empty)) ||
                 (e.Kind != ElementKind.Dimension && (e.StartReference is not null || e.EndReference is not null)) ||
                 e.GroupId == Guid.Empty || (e.Kind == ElementKind.Rectangle && (e.A.X == e.B.X || e.A.Y == e.B.Y)))
@@ -149,6 +155,18 @@ public sealed record DrawingDocument
             throw new InvalidDataException("Некоректне посилання текстового позначення.");
         _ = AssociativeDimensions.ResolveAll(Elements);
         DrivingDimensions.Validate(Elements);
+    }
+
+    private static bool ValidComponentLink(DrawingElement element,
+        IReadOnlyDictionary<Guid, DeviceVariantContext> variants)
+    {
+        if (element.Kind != ElementKind.Symbol)
+            return element.ComponentVariantId is null && element.PhysicalRepresentationId is null;
+        if (element.ComponentVariantId is null) return element.PhysicalRepresentationId is null;
+        if (!variants.TryGetValue(element.ComponentVariantId.Value, out var context) ||
+            context.Variant.SymbolKey != element.SymbolKey) return false;
+        return element.PhysicalRepresentationId is null ||
+            context.Variant.PhysicalRepresentations.Any(item => item.Id == element.PhysicalRepresentationId);
     }
 
     private static bool ValidPath(DrawingElement e)

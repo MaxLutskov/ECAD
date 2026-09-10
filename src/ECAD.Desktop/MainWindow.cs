@@ -32,7 +32,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.12  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.13  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);

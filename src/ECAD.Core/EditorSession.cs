@@ -60,6 +60,55 @@ public sealed class EditorSession
         return definition;
     }
 
+    public ComponentLibrary CreateComponentLibrary(string name, string? description = null)
+    {
+        var library = new ComponentLibrary(Guid.NewGuid(), Required(name, "Вкажи назву бібліотеки."), Optional(description), 1, []);
+        ApplyDocument(Document with { ComponentLibraries = [.. Document.ComponentLibraries, library] });
+        return library;
+    }
+
+    public DeviceTypeDefinition CreateDeviceType(Guid libraryId, string name, string? description,
+        ConfigurationField[] configurationFields)
+    {
+        var type = new DeviceTypeDefinition(Guid.NewGuid(), Required(name, "Вкажи тип пристрою."), Optional(description),
+            configurationFields ?? throw new InvalidDataException("Не задані поля конфігурації."), []);
+        ReplaceLibrary(libraryId, library => library with { DeviceTypes = [.. library.DeviceTypes, type] });
+        return type;
+    }
+
+    public DeviceFamily CreateDeviceFamily(Guid libraryId, Guid typeId, string name, string? manufacturer,
+        string? series, DeviceParameter[]? sharedParameters = null)
+    {
+        var family = new DeviceFamily(Guid.NewGuid(), Required(name, "Вкажи назву сімейства."), Optional(manufacturer),
+            Optional(series), sharedParameters ?? [], []);
+        ReplaceType(libraryId, typeId, type => type with { Families = [.. type.Families, family] });
+        return family;
+    }
+
+    public DeviceVariant CreateDeviceVariant(Guid libraryId, Guid typeId, Guid familyId, DeviceVariant variant)
+    {
+        if (variant.Id == Guid.Empty) variant = variant with { Id = Guid.NewGuid() };
+        ReplaceFamily(libraryId, typeId, familyId, family => family with { Variants = [.. family.Variants, variant] });
+        return variant;
+    }
+
+    public void AssignDeviceVariant(Guid symbolId, Guid? variantId, Guid? physicalRepresentationId = null)
+    {
+        var symbol = Document.Elements.SingleOrDefault(item => item.Id == symbolId && item.Kind == ElementKind.Symbol)
+            ?? throw new InvalidDataException("Виділений елемент не є символом.");
+        if (variantId is { } id)
+        {
+            var context = ComponentCatalog.FindVariant(Document, id)
+                ?? throw new InvalidDataException("Не знайдено варіант пристрою.");
+            if (context.Variant.SymbolKey != symbol.SymbolKey)
+                throw new InvalidDataException("Умовне позначення варіанта не відповідає символу на схемі.");
+            physicalRepresentationId ??= context.Variant.PhysicalRepresentations[0].Id;
+        }
+        Apply(Document.Elements.Select(item => item.Id == symbolId
+            ? item with { ComponentVariantId = variantId, PhysicalRepresentationId = physicalRepresentationId }
+            : item).ToArray());
+    }
+
     public void Add(DrawingElement element) => Apply([.. Document.Elements, element]);
     public void Delete() => Apply(Document.Elements.Where(e => !Selection.Contains(e.Id) &&
         !(e.LinkedElementId is { } owner && Selection.Contains(owner)) &&
@@ -239,11 +288,36 @@ public sealed class EditorSession
 
     private static DrawingDocument Normalize(DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 9)
+        if (document.SchemaVersion is < 1 or > 10)
             throw new InvalidDataException("Непідтримувана версія документа.");
         var elements = DrivingDimensions.ApplyAll(document.Elements);
-        var normalized = document with { SchemaVersion = 9, Elements = elements };
+        var normalized = document with { SchemaVersion = 10, Elements = elements };
         normalized.Validate();
         return normalized;
     }
+
+    private void ReplaceLibrary(Guid libraryId, Func<ComponentLibrary, ComponentLibrary> update)
+    {
+        if (!Document.ComponentLibraries.Any(item => item.Id == libraryId)) throw new InvalidDataException("Не знайдено бібліотеку.");
+        ApplyDocument(Document with { ComponentLibraries = Document.ComponentLibraries.Select(item =>
+            item.Id == libraryId ? update(item) : item).ToArray() });
+    }
+
+    private void ReplaceType(Guid libraryId, Guid typeId, Func<DeviceTypeDefinition, DeviceTypeDefinition> update) =>
+        ReplaceLibrary(libraryId, library =>
+        {
+            if (!library.DeviceTypes.Any(item => item.Id == typeId)) throw new InvalidDataException("Не знайдено тип пристрою.");
+            return library with { DeviceTypes = library.DeviceTypes.Select(item => item.Id == typeId ? update(item) : item).ToArray() };
+        });
+
+    private void ReplaceFamily(Guid libraryId, Guid typeId, Guid familyId, Func<DeviceFamily, DeviceFamily> update) =>
+        ReplaceType(libraryId, typeId, type =>
+        {
+            if (!type.Families.Any(item => item.Id == familyId)) throw new InvalidDataException("Не знайдено сімейство пристроїв.");
+            return type with { Families = type.Families.Select(item => item.Id == familyId ? update(item) : item).ToArray() };
+        });
+
+    private static string Required(string? value, string message) => string.IsNullOrWhiteSpace(value)
+        ? throw new InvalidDataException(message) : value.Trim();
+    private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

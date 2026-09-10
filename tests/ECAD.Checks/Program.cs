@@ -277,7 +277,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 9 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 10 && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -286,6 +286,66 @@ Check("Unsupported archive version rejected", () =>
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open())) writer.Write("{\"SchemaVersion\":999}");
     Reject(() => ProjectFile.Open(path));
+});
+Check("Device catalog supports arbitrary configuration axes and physical variants", () =>
+{
+    var s = new EditorSession();
+    var library = s.CreateComponentLibrary("Промислова автоматика", "Власна бібліотека підприємства");
+    var type = s.CreateDeviceType(library.Id, "Автоматичний вимикач", "Модульні та силові виконання",
+    [
+        new("poles", "Кількість полюсів", true, ["1P", "2P", "3P", "4P"]),
+        new("contact-arrangement", "Виконання контактів", true),
+        new("installation", "Спосіб встановлення")
+    ]);
+    var family = s.CreateDeviceFamily(library.Id, type.Id, "System pro M compact", "ABB", "S200",
+        [new("standard", "Стандарт", "IEC 60898-1")]);
+    var panel = new PhysicalRepresentation(Guid.NewGuid(), "DIN-виконання", 72, 85, 75, "DIN-рейка", 4);
+    var layout = new PhysicalRepresentation(Guid.NewGuid(), "Монтажна плата", 78, 92, 76, "Монтажна плата");
+    var variant = s.CreateDeviceVariant(library.Id, type.Id, family.Id,
+        new(Guid.Empty, "S204 C63", "2CDS254001R0634", "C63, 400 V", "IEC_BREAKER",
+            [new("poles", "4P"), new("contact-arrangement", "2NO+2NC"), new("installation", "знімне виконання")],
+            [new("rated-current", "Номінальний струм", "63", "A"), new("breaking-capacity", "Вимикальна здатність", "6", "kA")],
+            [new("1", "1", "Силовий вхід L1", "Power"), new("2", "2", "Силовий вихід T1", "Power")],
+            [panel, layout]));
+    var symbol = new DrawingElement(Guid.NewGuid(), ElementKind.Symbol, new(20, 20), new(20, 20))
+        { SymbolKey = "IEC_BREAKER", DeviceTag = "QF1" };
+    s.Add(symbol); s.AssignDeviceVariant(symbol.Id, variant.Id);
+    var linked = ComponentCatalog.FindVariant(s.Document, variant.Id)!;
+    Assert(linked.Library.Name == "Промислова автоматика" && linked.Family.Manufacturer == "ABB");
+    Assert(linked.Variant.Configuration.Any(value => value.Key == "poles" && value.Value == "4P"));
+    Assert(linked.Variant.Configuration.Any(value => value.Key == "contact-arrangement" && value.Value == "2NO+2NC"));
+    Assert(s.Document.Elements.Single().PhysicalRepresentationId == panel.Id);
+
+    var path = Path.Combine(output, "device-catalog.ecad"); ProjectFile.Save(path, s.Document);
+    var reopened = ProjectFile.Open(path); var restored = ComponentCatalog.FindVariant(reopened, variant.Id)!;
+    Assert(reopened.SchemaVersion == 10 && restored.Variant.PhysicalRepresentations.Length == 2);
+    Assert(reopened.Elements.Single().ComponentVariantId == variant.Id);
+    s.Undo(); Assert(s.Document.Elements.Single().ComponentVariantId is null);
+    s.Redo(); Assert(s.Document.Elements.Single().ComponentVariantId == variant.Id);
+});
+Check("Device catalog rejects invalid variants and incompatible symbols", () =>
+{
+    var s = new EditorSession();
+    var library = s.CreateComponentLibrary("Тестова");
+    var type = s.CreateDeviceType(library.Id, "Пристрій", null,
+        [new("channels", "Кількість каналів", true, ["1", "2", "8", "16"]), new("execution", "Виконання")]);
+    var family = s.CreateDeviceFamily(library.Id, type.Id, "Серія X", null, null);
+    var physical = new PhysicalRepresentation(Guid.NewGuid(), "Корпус", 20, 30, 40, "Панель");
+    var bad = new DeviceVariant(Guid.Empty, "X5", null, null, "IEC_COIL",
+        [new("channels", "5")], [], [], [physical]);
+    var before = s.Document;
+    Reject(() => s.CreateDeviceVariant(library.Id, type.Id, family.Id, bad));
+    Assert(ReferenceEquals(before, s.Document));
+
+    var valid = s.CreateDeviceVariant(library.Id, type.Id, family.Id, bad with
+    {
+        Name = "X16", Configuration = [new("channels", "16"), new("execution", "двоканальне резервування")]
+    });
+    var breaker = new DrawingElement(Guid.NewGuid(), ElementKind.Symbol, new(0, 0), new(0, 0))
+        { SymbolKey = "IEC_BREAKER", DeviceTag = "QF1" };
+    s.Add(breaker); before = s.Document;
+    Reject(() => s.AssignDeviceVariant(breaker.Id, valid.Id));
+    Assert(ReferenceEquals(before, s.Document));
 });
 
 AppBuilder.Configure<App>().UseSkia().WithInterFont()
@@ -361,7 +421,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 9);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 10);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -394,7 +454,7 @@ Check("Driving aligned dimension resizes a line and connected geometry atomicall
     Near(s.Document.Elements[3].DimensionValueMm, 24.75);
     var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path);
-    Assert(reopened.SchemaVersion == 9 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Assert(reopened.SchemaVersion == 10 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
     Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
     s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
 });
@@ -507,7 +567,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 9); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 10); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -728,7 +788,7 @@ Check("Pointer tool creates a three-point arc and stores it in project format", 
     var arc = interactive.Document.Elements.Single();
     Assert(arc.Kind == ElementKind.Arc); Near(arc.LengthMm, 20); Near(Math.Abs(arc.ArcSweepDegrees), 180);
     var path = Path.Combine(output, "arc-polyline.ecad"); ProjectFile.Save(path, interactive.Document);
-    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 9 && reopened.Elements.Single().Kind == ElementKind.Arc);
+    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 10 && reopened.Elements.Single().Kind == ElementKind.Arc);
     using var frame = liveWindow.CaptureRenderedFrame() ?? throw new Exception("No arc render");
     frame.Save(Path.Combine(output, "arc-tool.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
 });
@@ -915,6 +975,25 @@ Check("Property panel edits polyline vertices and arc parameters", () =>
     properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
         .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
     Near(interactive.Document.Elements.Single().LengthMm, 8); Near(interactive.Document.Elements.Single().ArcSweepDegrees, 90);
+    propertyWindow.Close();
+});
+Check("Property panel assigns and displays a device variant", () =>
+{
+    interactive.Load(ProjectFile.Open(Path.Combine(output, "device-catalog.ecad")));
+    var symbol = interactive.Document.Elements.Single(e => e.Kind == ElementKind.Symbol);
+    interactive.Select(symbol, false);
+    var properties = new PropertyPanel(interactive, _ => { });
+    var propertyWindow = new Window { Width = 360, Height = 800, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    var variant = properties.GetVisualDescendants().OfType<ComboBox>().Single(x => x.Name == "PropertyComponentVariant");
+    var physical = properties.GetVisualDescendants().OfType<ComboBox>().Single(x => x.Name == "PropertyPhysicalRepresentation");
+    Assert(variant.SelectedIndex == 1 && physical.ItemCount == 2);
+    var details = string.Join("\n", properties.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text));
+    Assert(details.Contains("Виробник: ABB") && details.Contains("Кількість полюсів: 4P") && details.Contains("2NO+2NC"));
+    physical.SelectedIndex = 1;
+    properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Assert(interactive.Document.Elements.Single(e => e.Id == symbol.Id).PhysicalRepresentationId != symbol.PhysicalRepresentationId);
     propertyWindow.Close();
 });
 liveWindow.Close();
