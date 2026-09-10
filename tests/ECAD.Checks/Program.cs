@@ -231,6 +231,12 @@ Check("Reject duplicate IDs and degenerate rectangles", () =>
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "tmp/checks");
 Directory.CreateDirectory(output);
 Environment.SetEnvironmentVariable("ECAD_LOG_PATH", Path.Combine(output, $"ecad-{Guid.NewGuid():N}.log"));
+Environment.SetEnvironmentVariable("ECAD_WORKSPACE_ROOT", Path.Combine(output, "workspace"));
+Check("Workspace creates dedicated project and library folders", () =>
+{
+    Assert(WorkspaceFolders.RootDirectory == Path.Combine(output, "workspace"));
+    Assert(Directory.Exists(WorkspaceFolders.ProjectsDirectory) && Directory.Exists(WorkspaceFolders.LibrariesDirectory));
+});
 Check("Application errors are persisted with context and exception details", () =>
 {
     AppLog.Write("Створення тестового символу", new InvalidOperationException("Тестова помилка"));

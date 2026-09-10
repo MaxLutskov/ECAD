@@ -284,7 +284,11 @@ public sealed class LibraryEditorWindow : Window
     {
         try
         {
-            var files = await StorageProvider.OpenFilePickerAsync(new() { Title = "Імпортувати бібліотеку", AllowMultiple = false, FileTypeFilter = [LibraryFileType] });
+            var libraries = await WorkspaceFolders.Libraries(StorageProvider);
+            var files = await StorageProvider.OpenFilePickerAsync(new()
+            {
+                Title = "Імпортувати бібліотеку", AllowMultiple = false, FileTypeFilter = [LibraryFileType], SuggestedStartLocation = libraries
+            });
             if (files.Count == 0) return;
             var path = files[0].TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
             var keys = SymbolLibrary.Definitions(session.Document).Select(item => item.Key);
@@ -299,10 +303,12 @@ public sealed class LibraryEditorWindow : Window
         try
         {
             var library = CurrentLibrary() ?? throw new InvalidDataException("Обери бібліотеку.");
+            var libraries = await WorkspaceFolders.Libraries(StorageProvider);
             var file = await StorageProvider.SaveFilePickerAsync(new()
             {
                 Title = "Експортувати бібліотеку", SuggestedFileName = SafeName(library.Name) + ".ecadlib",
-                DefaultExtension = "ecadlib", FileTypeChoices = [LibraryFileType], ShowOverwritePrompt = true
+                DefaultExtension = "ecadlib", FileTypeChoices = [LibraryFileType], ShowOverwritePrompt = true,
+                SuggestedStartLocation = libraries
             });
             if (file is null) return;
             ComponentLibraryFile.Save(file.TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл."), library);

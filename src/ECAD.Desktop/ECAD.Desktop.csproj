@@ -6,8 +6,4 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.2" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\examples\libraries\*.ecadlib" Link="examples\libraries\%(Filename)%(Extension)"
-          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
 </Project>

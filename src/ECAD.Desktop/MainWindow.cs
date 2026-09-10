@@ -32,7 +32,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.14  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Text = "ECAD 0.15  /  Креслення в міліметрах", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
@@ -369,10 +369,12 @@ public sealed class MainWindow : Window
         canvas.Cancel();
         try
         {
+            var projects = await WorkspaceFolders.Projects(StorageProvider);
             var file = await StorageProvider.SaveFilePickerAsync(new()
             {
                 Title = "Зберегти проєкт", SuggestedFileName = Path.GetFileName(currentPath) ?? "drawing.ecad",
-                DefaultExtension = "ecad", FileTypeChoices = [FileType], ShowOverwritePrompt = true
+                DefaultExtension = "ecad", FileTypeChoices = [FileType], ShowOverwritePrompt = true,
+                SuggestedStartLocation = projects
             });
             if (file is null) return;
             var path = file.TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
@@ -389,7 +391,11 @@ public sealed class MainWindow : Window
         if (!await CanDiscard()) return;
         try
         {
-            var files = await StorageProvider.OpenFilePickerAsync(new() { Title = "Відкрити проєкт", AllowMultiple = false, FileTypeFilter = [FileType] });
+            var projects = await WorkspaceFolders.Projects(StorageProvider);
+            var files = await StorageProvider.OpenFilePickerAsync(new()
+            {
+                Title = "Відкрити проєкт", AllowMultiple = false, FileTypeFilter = [FileType], SuggestedStartLocation = projects
+            });
             if (files.Count == 0) return;
             var path = files[0].TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
             var document = ProjectFile.Open(path);
