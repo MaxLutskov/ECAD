@@ -499,6 +499,25 @@ Check("Pointer tool builds an orthogonal multi-segment wire", () =>
     Assert(wire.Kind == ElementKind.Wire);
     Assert(wire.Points!.SequenceEqual([new PointMm(10, 10), new(50, 10), new(50, 30)]));
 });
+Check("Wire supports consecutive exact length and orthogonal angle segments", () =>
+{
+    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Wire); Tap(60, 60); liveWindow.MouseMove(new(240, 60));
+    liveWindow.KeyTextInput("12.3");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("0");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    Assert(interactive.Document.Elements.Length == 0 && liveCanvas.IsDrawing);
+    liveWindow.KeyTextInput("7.2");
+    liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+    liveWindow.KeyTextInput("90");
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var exactWire = interactive.Document.Elements.Single();
+    var exactPoints = exactWire.Points ?? throw new Exception("Wire points missing");
+    Assert(exactWire.Kind == ElementKind.Wire && exactPoints.Length == 3);
+    Assert(exactPoints[0] == new PointMm(10, 10)); Near(exactPoints[1].X, 22.3); Near(exactPoints[1].Y, 10);
+    Near(exactPoints[2].X, 22.3); Near(exactPoints[2].Y, 2.8);
+});
 Check("Pointer places a selected IEC symbol and renders its contacts", () =>
 {
     liveCanvas.ActiveSymbolKey = "IEC_NO_CONTACT"; liveCanvas.SetTool(ElementKind.Symbol); Tap(228, 156);

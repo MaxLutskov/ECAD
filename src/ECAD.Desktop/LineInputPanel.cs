@@ -26,6 +26,7 @@ public sealed class LineInputPanel : Border
     public double? Angle { get; private set; }
     public double? FirstValue => Length;
     public double? SecondValue => Angle;
+    public bool HasInput => lengthLocked || angleLocked;
     public bool Valid { get; private set; } = true;
     public event Action? Edited;
     public event Action? Confirm;
@@ -86,6 +87,9 @@ public sealed class LineInputPanel : Border
                 (!angleLocked || Angle is > 0 and <= 10000),
             ElementKind.Circle => (!lengthLocked || Length is > 0 and <= 5000) &&
                 (!angleLocked || Angle is > 0 and <= 10000),
+            ElementKind.Wire => (!lengthLocked || Length is > 0 and <= 10000) &&
+                (!angleLocked || Angle is >= -36000 and <= 36000 &&
+                    Math.Abs(Angle.Value / 90 - Math.Round(Angle.Value / 90)) < 1e-9),
             _ => false
         };
         BorderBrush = Valid ? Brushes.Teal : Brushes.IndianRed;
@@ -94,6 +98,7 @@ public sealed class LineInputPanel : Border
             ElementKind.Line => "Довжина: 0…10000 мм (>0). Кут: число.",
             ElementKind.Rectangle => "Ширина й висота: 0…10000 мм (>0).",
             ElementKind.Circle => "Радіус або діаметр має бути більшим за 0.",
+            ElementKind.Wire => "Довжина: >0. Кут провідника: 0°, 90°, 180° або 270°.",
             _ => "Некоректне значення."
         };
     }
@@ -147,7 +152,7 @@ public sealed class LineInputPanel : Border
 
     private void Configure(ElementKind kind)
     {
-        if (kind is not (ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle))
+        if (kind is not (ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle or ElementKind.Wire))
             throw new ArgumentOutOfRangeException(nameof(kind));
         mode = kind;
         (firstLabel.Text, secondLabel.Text) = kind switch
@@ -155,6 +160,7 @@ public sealed class LineInputPanel : Border
             ElementKind.Line => ("Довжина, мм", "Кут, °"),
             ElementKind.Rectangle => ("Ширина, мм", "Висота, мм"),
             ElementKind.Circle => ("Радіус, мм", "Діаметр, мм"),
+            ElementKind.Wire => ("Довжина сегмента, мм", "Кут, ° (кратно 90)"),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
     }

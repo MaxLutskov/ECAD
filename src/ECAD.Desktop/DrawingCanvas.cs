@@ -47,7 +47,7 @@ public sealed class DrawingCanvas : Decorator
         session.Changed += InvalidateVisual;
         Child = LineInput;
         LineInput.Edited += () => { UpdateGeometryInput(); InvalidateVisual(); };
-        LineInput.Confirm += CommitGeometry;
+        LineInput.Confirm += () => { if (Tool == ElementKind.Wire) CommitWireParameter(); else CommitGeometry(); };
         LineInput.Cancelled += EscapeToSelection;
     }
 
@@ -111,13 +111,14 @@ public sealed class DrawingCanvas : Decorator
 
     private static double Direction(double value) => value < 0 ? -1 : 1;
     private bool HasGeometryInput => Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle;
+    private bool HasParameterInput => HasGeometryInput || Tool == ElementKind.Wire && wirePoints.Count > 0;
 
     private bool FromInput(object? source) => source is Visual v && (v == LineInput || v.GetVisualAncestors().Contains(LineInput));
 
     private void UpdateGeometryInput()
     {
-        if (anchor is not { } a || !HasGeometryInput) return;
-        var end = EndPoint(a, cursor);
+        if (anchor is not { } a || !HasParameterInput) return;
+        var end = Tool == ElementKind.Wire ? WireInputEnd(a, cursor) : EndPoint(a, cursor);
         var delta = end - a;
         if (Tool == ElementKind.Rectangle) LineInput.UpdateLive(Math.Abs(delta.X), Math.Abs(delta.Y));
         else if (Tool == ElementKind.Circle) LineInput.UpdateLive(delta.Length, delta.Length * 2);
@@ -236,7 +237,27 @@ public sealed class DrawingCanvas : Decorator
     private PointMm[] PreviewWire()
     {
         if (wirePoints.Count == 0) return [];
+        if (LineInput.HasInput) return [.. wirePoints, WireInputEnd(wirePoints[^1], cursor)];
         return [.. wirePoints, .. OrthogonalRoute(wirePoints[^1], cursor)];
+    }
+
+    private PointMm WireInputEnd(PointMm start, PointMm end)
+    {
+        var delta = end - start;
+        var angle = LineInput.SecondValue ?? CardinalAngle(delta);
+        var length = LineInput.FirstValue ?? ProjectedCardinalLength(delta, angle);
+        if (length <= 1e-9) return start;
+        return Geometry.Polar(start, length, angle);
+    }
+
+    private static double CardinalAngle(PointMm delta) => Math.Abs(delta.X) >= Math.Abs(delta.Y)
+        ? delta.X < 0 ? 180 : 0
+        : delta.Y < 0 ? 90 : 270;
+
+    private static double ProjectedCardinalLength(PointMm delta, double angle)
+    {
+        var normalized = ((angle % 360) + 360) % 360;
+        return normalized is 0 or 180 ? Math.Abs(delta.X) : Math.Abs(delta.Y);
     }
 
     private void AddWirePoint(GeometryPick pick, bool finish)
@@ -244,13 +265,30 @@ public sealed class DrawingCanvas : Decorator
         if (wirePoints.Count == 0)
         {
             wirePoints.Add(pick.Point); anchor = pick.Point;
-            Status?.Invoke("Веди провідник; клік — зафіксувати трасу, Space — змінити напрям кута, Enter — завершити.");
+            LineInput.Begin(ElementKind.Wire); UpdateGeometryInput();
+            Status?.Invoke("Веди провідник; клік — точка траси, число — довжина сегмента, Enter — підтвердити/завершити.");
             return;
         }
-        foreach (var point in OrthogonalRoute(wirePoints[^1], pick.Point))
+        if (LineInput.HasInput && !LineInput.Valid)
+        { Status?.Invoke("Виправ довжину або кут точного сегмента."); return; }
+        var route = LineInput.HasInput ? new[] { WireInputEnd(wirePoints[^1], pick.Point) } : OrthogonalRoute(wirePoints[^1], pick.Point);
+        foreach (var point in route)
             if (point != wirePoints[^1]) wirePoints.Add(point);
         anchor = wirePoints[^1];
-        if (finish || pick.Reference is not null) CommitWire();
+        if (finish || !LineInput.HasInput && pick.Reference is not null) CommitWire();
+        else { LineInput.Begin(ElementKind.Wire); UpdateGeometryInput(); Focus(); }
+    }
+
+    private void CommitWireParameter()
+    {
+        if (!LineInput.Valid) return;
+        if (!LineInput.HasInput) { CommitWire(); return; }
+        var target = WireInputEnd(wirePoints[^1], cursor);
+        if (target == wirePoints[^1]) return;
+        wirePoints.Add(target); anchor = target;
+        LineInput.Begin(ElementKind.Wire); UpdateGeometryInput(); Focus();
+        Status?.Invoke("Точний сегмент додано. Введи наступний або натисни Enter ще раз для завершення провідника.");
+        InvalidateVisual();
     }
 
     private void CommitWire()
@@ -358,6 +396,11 @@ public sealed class DrawingCanvas : Decorator
         if (Tool == ElementKind.Wire && previewWire.Length >= 2)
             for (var i = 1; i < previewWire.Length; i++)
                 context.DrawLine(new Pen(Brushes.Teal, Math.Max(1, .25 * scale)), Screen(previewWire[i - 1]), Screen(previewWire[i]));
+        if (Tool == ElementKind.Wire && wirePoints.Count > 0 && !LineInput.IsVisible)
+        {
+            var end = LineInput.HasInput ? WireInputEnd(wirePoints[^1], cursor) : previewWire[^1];
+            DrawLiveGeometryValues(context, Screen(end), ElementKind.Wire, end - wirePoints[^1]);
+        }
         if (anchor is { } geometryStart && Tool is ElementKind.Line or ElementKind.Rectangle or ElementKind.Circle && !LineInput.IsVisible)
         {
             var end = EndPoint(geometryStart, cursor);
@@ -394,6 +437,7 @@ public sealed class DrawingCanvas : Decorator
             ElementKind.Line => $"L {delta.Length:0.###} мм    ∠ {Geometry.Angle(delta):0.###}°",
             ElementKind.Rectangle => $"Ш {Math.Abs(delta.X):0.###} мм    В {Math.Abs(delta.Y):0.###} мм",
             ElementKind.Circle => $"R {delta.Length:0.###} мм    ⌀ {delta.Length * 2:0.###} мм",
+            ElementKind.Wire => $"L {delta.Length:0.###} мм    ∠ {Geometry.Angle(delta):0.###}°",
             _ => ""
         };
         var text = new FormattedText(value, CultureInfo.CurrentCulture,
@@ -595,7 +639,7 @@ public sealed class DrawingCanvas : Decorator
         if (boxStart is not null) boxEnd = raw;
         if (dragStart is { } start) dragDelta = cursor - start;
         PlaceDimension(); UpdateGeometryInput();
-        var details = anchor is { } a ? GeometryStatus(a, EndPoint(a, cursor)) : "";
+        var details = anchor is { } a ? GeometryStatus(a, Tool == ElementKind.Wire ? WireInputEnd(a, cursor) : EndPoint(a, cursor)) : "";
         Status?.Invoke($"X {cursor.X:0.###} мм   Y {cursor.Y:0.###} мм{details}");
         InvalidateVisual();
     }
@@ -608,6 +652,7 @@ public sealed class DrawingCanvas : Decorator
             ElementKind.Line => $"   Довжина {delta.Length:0.###} мм   Кут {Geometry.Angle(delta):0.###}°",
             ElementKind.Rectangle => $"   Ширина {Math.Abs(delta.X):0.###} мм   Висота {Math.Abs(delta.Y):0.###} мм",
             ElementKind.Circle => $"   Радіус {delta.Length:0.###} мм   Діаметр {delta.Length * 2:0.###} мм",
+            ElementKind.Wire => $"   Сегмент {delta.Length:0.###} мм   Кут {Geometry.Angle(delta):0.###}°",
             _ => $"   Довжина {delta.Length:0.###} мм"
         };
     }
@@ -650,7 +695,7 @@ public sealed class DrawingCanvas : Decorator
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (HasGeometryInput && anchor is not null && !LineInput.IsKeyboardFocusWithin &&
+        if (HasParameterInput && anchor is not null && !LineInput.IsKeyboardFocusWithin &&
             !string.IsNullOrEmpty(e.Text) && e.Text.All(c => char.IsDigit(c) || c is '.' or ',' or '-' or '+'))
         { LineInput.StartTyping(e.Text); e.Handled = true; }
     }
@@ -659,12 +704,12 @@ public sealed class DrawingCanvas : Decorator
     {
         base.OnKeyDown(e);
         if (FromInput(e.Source)) return;
-        if (e.Key == Key.Tab && anchor is not null && HasGeometryInput)
+        if (e.Key == Key.Tab && anchor is not null && HasParameterInput)
         { LineInput.FocusField(false); e.Handled = true; return; }
         if (e.Key == Key.Enter)
         {
             if (HasGeometryInput) CommitGeometry();
-            else if (Tool == ElementKind.Wire) CommitWire();
+            else if (Tool == ElementKind.Wire) CommitWireParameter();
             else if (Tool == ElementKind.Dimension)
             {
                 if (pendingDimension is not null) { session.Add(pendingDimension); Cancel(); }

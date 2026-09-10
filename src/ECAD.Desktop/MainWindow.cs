@@ -31,7 +31,7 @@ public sealed class MainWindow : Window
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.8  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
+        var title = new TextBlock { Text = "ECAD 0.8.1  /  Креслення в міліметрах", FontSize = 20, Margin = new Thickness(14, 12) };
         header.Children.Add(title);
         var files = new WrapPanel { Margin = new Thickness(8, 0) };
         header.Children.Add(files);
@@ -58,7 +58,7 @@ public sealed class MainWindow : Window
         AddButton(tools, "Розмір", () => SetTool(ElementKind.Dimension, "Розмір: обери дві точки / паралельні лінії, потім клацни місце напису."));
         AddButton(tools, "Вузол", () => SetTool(ElementKind.Junction, "Вузол: клацни кінець, сегмент або перетин ліній. Звичайний перетин без точки не є з’єднанням."));
         AddButton(tools, "Текст", () => SetTool(ElementKind.Text, "Текст: клацни місце розташування. Подвійний клік редагує наявний напис."));
-        AddButton(tools, "Провідник", () => SetTool(ElementKind.Wire, "Провідник: кліки задають ортогональну трасу; Space змінює напрям кута; Enter або подвійний клік завершує."));
+        AddButton(tools, "Провідник", () => SetTool(ElementKind.Wire, "Провідник: кліки задають трасу; число → довжина → Tab → кут (кратно 90°) → Enter. Повторний Enter завершує."));
         symbolPicker.ItemTemplate = new FuncDataTemplate<SymbolDefinition>((item, _) => new TextBlock { Text = item?.Name ?? "" });
         symbolPicker.SelectionChanged += (_, _) => { if (symbolPicker.SelectedItem is SymbolDefinition item) canvas.ActiveSymbolKey = item.Key; };
         tools.Children.Add(symbolPicker); RefreshSymbolPicker();
