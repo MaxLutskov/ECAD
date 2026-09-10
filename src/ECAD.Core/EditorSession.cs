@@ -18,27 +18,26 @@ public sealed class EditorSession
     public void Load(DrawingDocument document)
     {
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
-        document.Validate();
-        Document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        document = Normalize(document);
+        Document = document;
         undo.Clear(); redo.Clear(); Selection.Clear(); Changed?.Invoke();
     }
 
     public void Apply(DrawingElement[] elements)
     {
-        if (Document.Elements.SequenceEqual(elements)) return;
-        var next = Document with { Elements = [.. elements] };
-        next.Validate();
+        var next = Normalize(Document with { Elements = [.. elements] });
+        if (Document.Elements.SequenceEqual(next.Elements)) return;
         undo.Add(Document);
         if (undo.Count > 200) undo.RemoveAt(0);
-        Document = next with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(elements) }; redo.Clear(); Notify();
+        Document = next; redo.Clear(); Notify();
     }
 
     public void ApplyDocument(DrawingDocument document)
     {
-        document.Validate();
+        document = Normalize(document);
         if (ReferenceEquals(Document, document)) return;
         undo.Add(Document); if (undo.Count > 200) undo.RemoveAt(0);
-        Document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        Document = document;
         redo.Clear(); Notify();
     }
 
@@ -172,15 +171,26 @@ public sealed class EditorSession
             {
                 if (reference is null || !Selection.Contains(reference.ElementId)) return reference;
                 var owner = Document.Elements.Single(source => source.Id == reference.ElementId);
-                return owner.Kind == ElementKind.Rectangle
-                    ? reference with { Index = (reference.Index + 1) % 4 }
-                    : reference;
+                if (reference.Kind == ReferenceKind.Curve)
+                    return reference with { Parameter = (reference.Parameter + .25) % 1 };
+                return owner.Kind == ElementKind.Rectangle && reference.Kind == ReferenceKind.Vertex
+                    ? reference with { Index = (reference.Index + 1) % 4 } : reference;
             }
-            return e.Kind == ElementKind.Dimension ? e with
+            if (e.Kind != ElementKind.Dimension) return e;
+            var followsRotation = e.StartReference is { } start && Selection.Contains(start.ElementId) ||
+                e.EndReference is { } end && Selection.Contains(end.ElementId);
+            var type = followsRotation ? e.DimensionType switch
+            {
+                DimensionType.Horizontal => DimensionType.Vertical,
+                DimensionType.Vertical => DimensionType.Horizontal,
+                _ => e.DimensionType
+            } : e.DimensionType;
+            return e with
             {
                 StartReference = Remap(e.StartReference),
-                EndReference = Remap(e.EndReference)
-            } : e;
+                EndReference = Remap(e.EndReference),
+                DimensionType = type
+            };
         }).ToArray();
         Apply(rotated);
     }
@@ -207,5 +217,15 @@ public sealed class EditorSession
     private void Notify()
     {
         Selection.IntersectWith(Document.Elements.Select(e => e.Id)); Changed?.Invoke();
+    }
+
+    private static DrawingDocument Normalize(DrawingDocument document)
+    {
+        if (document.SchemaVersion is < 1 or > 8)
+            throw new InvalidDataException("Непідтримувана версія документа.");
+        var elements = DrivingDimensions.ApplyAll(document.Elements);
+        var normalized = document with { SchemaVersion = 8, Elements = elements };
+        normalized.Validate();
+        return normalized;
     }
 }

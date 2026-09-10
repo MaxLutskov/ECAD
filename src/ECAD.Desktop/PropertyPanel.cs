@@ -69,6 +69,8 @@ public sealed class PropertyPanel : Border
 
         Field("Name", "Назва об’єкта", element.Name);
         ComboBox? pathKind = null;
+        ComboBox? dimensionMode = null;
+        ComboBox? dimensionType = null;
         if (element.Kind is ElementKind.Line or ElementKind.Wire)
         {
             pathKind = new ComboBox
@@ -129,8 +131,25 @@ public sealed class PropertyPanel : Border
                 Field("X", "X, мм", element.A.X); Field("Y", "Y, мм", element.A.Y);
                 break;
             case ElementKind.Dimension:
-                Field("Length", "Виміряне значення, мм", element.LengthMm, true);
+                panel.Children.Add(new TextBlock { Text = "Тип розміру", FontSize = 12, Foreground = Brushes.DimGray });
+                dimensionType = new ComboBox
+                {
+                    Name = "PropertyDimensionType",
+                    ItemsSource = new[] { "Вирівняний", "Горизонтальний", "Вертикальний", "Радіус", "Діаметр" },
+                    SelectedIndex = (int)element.DimensionType
+                };
+                panel.Children.Add(dimensionType);
+                panel.Children.Add(new TextBlock { Text = "Режим", FontSize = 12, Foreground = Brushes.DimGray });
+                dimensionMode = new ComboBox
+                {
+                    Name = "PropertyDimensionMode", ItemsSource = new[] { "Довідковий", "Керувальний" },
+                    SelectedIndex = (int)element.DimensionMode
+                };
+                panel.Children.Add(dimensionMode);
+                Field("Length", "Поточне значення, мм", element.DimensionValueMm, true);
+                Field("Target", "Задане значення, мм", element.DimensionTargetMm ?? element.DimensionValueMm);
                 Field("Offset", "Відступ розмірної лінії, мм", element.DimensionOffset);
+                panel.Children.Add(Info("Для керування лінією обери два її кінці; для прямокутника — сусідні кути; для кола — центр і контур."));
                 break;
         }
 
@@ -141,7 +160,7 @@ public sealed class PropertyPanel : Border
         {
             try
             {
-                Apply(element.Id, fields, pathKind);
+                Apply(element.Id, fields, pathKind, dimensionType, dimensionMode);
                 report("Властивості об’єкта оновлено.");
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or ArgumentOutOfRangeException)
@@ -160,7 +179,8 @@ public sealed class PropertyPanel : Border
         field("Angle", "Кут, °", Geometry.Angle(element.B - element.A), false);
     }
 
-    private void Apply(Guid id, Dictionary<string, TextBox> fields, ComboBox? pathKind)
+    private void Apply(Guid id, Dictionary<string, TextBox> fields, ComboBox? pathKind,
+        ComboBox? dimensionType, ComboBox? dimensionMode)
     {
         var source = session.Document.Elements.Single(e => e.Id == id);
         var name = fields["Name"].Text?.Trim();
@@ -221,7 +241,14 @@ public sealed class PropertyPanel : Border
                 updated = updated with { A = Position(), B = Position() };
                 break;
             case ElementKind.Dimension:
-                updated = updated with { DimensionOffset = Number(fields, "Offset") };
+                var mode = (DimensionMode)(dimensionMode?.SelectedIndex ?? 0);
+                updated = updated with
+                {
+                    DimensionOffset = Number(fields, "Offset"),
+                    DimensionType = (DimensionType)(dimensionType?.SelectedIndex ?? 0),
+                    DimensionMode = mode,
+                    DimensionTargetMm = mode == DimensionMode.Driving ? Positive(fields, "Target") : null
+                };
                 break;
         }
 

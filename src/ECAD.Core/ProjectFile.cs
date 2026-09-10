@@ -8,8 +8,9 @@ public static class ProjectFile
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
     public static void Save(string path, DrawingDocument document)
     {
+        if (document.SchemaVersion is < 1 or > 8) throw new InvalidDataException("Непідтримувана версія документа.");
+        document = document with { SchemaVersion = 8, Elements = DrivingDimensions.ApplyAll(document.Elements) };
         document.Validate();
-        document = document with { SchemaVersion = 7, Elements = AssociativeDimensions.ResolveAll(document.Elements) };
         path = Path.GetFullPath(path);
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -36,10 +37,10 @@ public static class ProjectFile
         using var stream = entry.Open();
         var document = JsonSerializer.Deserialize<DrawingDocument>(stream, Options)
             ?? throw new InvalidDataException("Порожній документ.");
-        document.Validate();
+        if (document.SchemaVersion is < 1 or > 8) throw new InvalidDataException("Непідтримувана версія документа.");
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
-        document = document with { SchemaVersion = 7 };
+        document = document with { SchemaVersion = 8, Elements = DrivingDimensions.ApplyAll(document.Elements) };
         document.Validate();
-        return document with { Elements = AssociativeDimensions.ResolveAll(document.Elements) };
+        return document;
     }
 }

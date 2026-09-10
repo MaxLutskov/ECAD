@@ -510,13 +510,17 @@ public sealed class DrawingCanvas : Decorator
             case ElementKind.Symbol:
                 DrawSymbol(ctx, e, pen, brush); break;
             case ElementKind.Dimension:
-                var v = e.LengthMm > 1e-9 ? (e.B - e.A) * (1 / e.LengthMm) : new PointMm(1, 0);
+                var dimensionLine = e.DimensionSegments()[^1];
+                var lineLength = (dimensionLine.B - dimensionLine.A).Length;
+                var v = lineLength > 1e-9 ? (dimensionLine.B - dimensionLine.A) * (1 / lineLength) : new PointMm(1, 0);
                 var n = new PointMm(-v.Y, v.X);
-                var aa = e.A + n * e.DimensionOffset; var bb = e.B + n * e.DimensionOffset;
+                var aa = dimensionLine.A; var bb = dimensionLine.B;
                 foreach (var edge in e.DimensionSegments()) ctx.DrawLine(pen, Screen(edge.A), Screen(edge.B));
                 foreach (var p in new[] { aa, bb })
                     ctx.DrawLine(pen, Screen(p - (v + n) * 1.2), Screen(p + (v + n) * 1.2));
-                var text = new FormattedText($"{e.LengthMm:0.###} мм", CultureInfo.CurrentCulture,
+                var prefix = e.DimensionMode == DimensionMode.Driving ? "◆ " : "";
+                var symbol = e.DimensionType == DimensionType.Diameter ? "⌀ " : e.DimensionType == DimensionType.Radius ? "R " : "";
+                var text = new FormattedText($"{prefix}{symbol}{e.DimensionValueMm:0.###} мм", CultureInfo.CurrentCulture,
                     FlowDirection.LeftToRight, Typeface.Default, 13, brush);
                 var middle = Screen((aa + bb) * .5);
                 ctx.DrawRectangle(Brushes.White, null, new Rect(middle.X - text.Width / 2 - 3, middle.Y - 20, text.Width + 6, 18));

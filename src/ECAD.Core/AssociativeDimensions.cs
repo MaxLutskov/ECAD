@@ -1,6 +1,6 @@
 namespace ECAD.Core;
 
-public enum ReferenceKind { Vertex, Edge }
+public enum ReferenceKind { Vertex, Edge, Curve }
 public sealed record GeometryReference(Guid ElementId, ReferenceKind Kind, int Index, double Parameter = 0);
 public sealed record GeometryPick(PointMm Point, GeometryReference? Reference);
 
@@ -39,6 +39,17 @@ public static class AssociativeDimensions
                 { distance = (vertices[i] - p).Length; best = new(vertices[i], new(e.Id, ReferenceKind.Vertex, i)); }
         }
         if (best is not null) return best;
+        foreach (var e in list.Where(e => e.Kind == ElementKind.Circle))
+        {
+            var delta = p - e.A;
+            if (delta.Length < 1e-9 || Math.Abs(delta.Length - e.LengthMm) > distance) continue;
+            var angle = Math.Atan2(delta.Y, delta.X);
+            if (angle < 0) angle += Math.PI * 2;
+            var point = e.A + delta * (e.LengthMm / delta.Length);
+            distance = Math.Abs(delta.Length - e.LengthMm);
+            best = new(point, new(e.Id, ReferenceKind.Curve, 0, angle / (Math.PI * 2)));
+        }
+        if (best is not null) return best;
         foreach (var e in list)
         {
             var edges = Edges(e);
@@ -64,7 +75,13 @@ public static class AssociativeDimensions
         if (!elements.TryGetValue(r.ElementId, out var e) || e.Kind is ElementKind.Dimension or ElementKind.Text ||
             !Enum.IsDefined(r.Kind) || r.Index < 0 || !double.IsFinite(r.Parameter) || r.Parameter < 0 || r.Parameter > 1)
             throw new InvalidDataException("Некоректна прив’язка розміру.");
-        var count = r.Kind == ReferenceKind.Vertex ? Vertices(e).Length : Edges(e).Length;
+        var count = r.Kind switch
+        {
+            ReferenceKind.Vertex => Vertices(e).Length,
+            ReferenceKind.Edge => Edges(e).Length,
+            ReferenceKind.Curve when e.Kind == ElementKind.Circle => 1,
+            _ => 0
+        };
         if (r.Index >= count) throw new InvalidDataException("Не знайдено геометрію прив’язки.");
         return e;
     }
@@ -73,6 +90,11 @@ public static class AssociativeDimensions
     {
         var e = Owner(r, elements);
         if (r.Kind == ReferenceKind.Vertex) return Vertices(e)[r.Index];
+        if (r.Kind == ReferenceKind.Curve)
+        {
+            var angle = r.Parameter * Math.PI * 2;
+            return e.A + new PointMm(Math.Cos(angle), Math.Sin(angle)) * e.LengthMm;
+        }
         var (a, b) = Edges(e)[r.Index]; return a + (b - a) * r.Parameter;
     }
 

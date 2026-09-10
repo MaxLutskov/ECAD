@@ -5,6 +5,12 @@ namespace ECAD.Core;
 [JsonConverter(typeof(JsonStringEnumConverter<ElementKind>))]
 public enum ElementKind { Line, Rectangle, Circle, Dimension, Junction, Text, Wire, Symbol }
 
+[JsonConverter(typeof(JsonStringEnumConverter<DimensionType>))]
+public enum DimensionType { Aligned, Horizontal, Vertical, Radius, Diameter }
+
+[JsonConverter(typeof(JsonStringEnumConverter<DimensionMode>))]
+public enum DimensionMode { Reference, Driving }
+
 // For a circle, A is the centre and B a point on the circumference.
 // Dimensions store stable references; A/B are resolved measurement positions.
 public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointMm B, Guid? GroupId = null)
@@ -13,6 +19,9 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
     public GeometryReference? StartReference { get; init; }
     public GeometryReference? EndReference { get; init; }
     public double DimensionOffset { get; init; } = 7;
+    public DimensionType DimensionType { get; init; }
+    public DimensionMode DimensionMode { get; init; }
+    public double? DimensionTargetMm { get; init; }
     public string? Text { get; init; }
     public double TextHeightMm { get; init; } = 3.5;
     public double RotationDegrees { get; init; }
@@ -23,6 +32,13 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
     public SymbolStroke[]? SymbolStrokes { get; init; }
     public Guid? LinkedElementId { get; init; }
     [JsonIgnore] public double LengthMm => (B - A).Length;
+    [JsonIgnore] public double DimensionValueMm => DimensionType switch
+    {
+        DimensionType.Horizontal => Math.Abs(B.X - A.X),
+        DimensionType.Vertical => Math.Abs(B.Y - A.Y),
+        DimensionType.Diameter => LengthMm * 2,
+        _ => LengthMm
+    };
     [JsonIgnore] public PointMm[] GeometryPoints => Kind == ElementKind.Wire ? Points! : [A, B];
     public DrawingElement Move(PointMm delta) => this with
     {
@@ -32,6 +48,19 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
     public (PointMm A, PointMm B)[] DimensionSegments()
     {
+        if (DimensionType is DimensionType.Radius or DimensionType.Diameter) return [(A, B)];
+        if (DimensionType == DimensionType.Horizontal)
+        {
+            var y = (A.Y + B.Y) / 2 + DimensionOffset;
+            var extra = Math.CopySign(2, DimensionOffset == 0 ? 1 : DimensionOffset);
+            return [(A, new(A.X, y + extra)), (B, new(B.X, y + extra)), (new(A.X, y), new(B.X, y))];
+        }
+        if (DimensionType == DimensionType.Vertical)
+        {
+            var x = (A.X + B.X) / 2 + DimensionOffset;
+            var extra = Math.CopySign(2, DimensionOffset == 0 ? 1 : DimensionOffset);
+            return [(A, new(x + extra, A.Y)), (B, new(x + extra, B.Y)), (new(x, A.Y), new(x, B.Y))];
+        }
         var v = LengthMm > 1e-9 ? (B - A) * (1 / LengthMm) : new PointMm(1, 0);
         var n = new PointMm(-v.Y, v.X);
         var extension = DimensionOffset + Math.CopySign(2, DimensionOffset);
@@ -72,7 +101,7 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 7;
+    public int SchemaVersion { get; init; } = 8;
     public double WidthMm { get; init; } = 420;
     public double HeightMm { get; init; } = 297;
     public DrawingElement[] Elements { get; init; } = [];
@@ -80,7 +109,7 @@ public sealed record DrawingDocument
 
     public void Validate()
     {
-        if (SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or 7)) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > 8) throw new InvalidDataException("Непідтримувана версія документа.");
         if (!double.IsFinite(WidthMm) || !double.IsFinite(HeightMm) || WidthMm <= 0 || HeightMm <= 0 ||
             WidthMm > 10000 || HeightMm > 10000)
             throw new InvalidDataException("Некоректний розмір аркуша.");
@@ -96,6 +125,12 @@ public sealed record DrawingDocument
                 (e.Name is not null && (string.IsNullOrWhiteSpace(e.Name) || e.Name.Length > 200)) ||
                 (e.LengthMm < 1e-9 && e.Kind is not (ElementKind.Dimension or ElementKind.Junction or ElementKind.Text or ElementKind.Symbol)) ||
                 !double.IsFinite(e.LengthMm) || !double.IsFinite(e.DimensionOffset) ||
+                !Enum.IsDefined(e.DimensionType) || !Enum.IsDefined(e.DimensionMode) ||
+                (e.Kind != ElementKind.Dimension && (e.DimensionType != DimensionType.Aligned ||
+                    e.DimensionMode != DimensionMode.Reference || e.DimensionTargetMm is not null)) ||
+                (e.Kind == ElementKind.Dimension && e.DimensionMode == DimensionMode.Reference && e.DimensionTargetMm is not null) ||
+                (e.Kind == ElementKind.Dimension && e.DimensionMode == DimensionMode.Driving &&
+                    (e.DimensionTargetMm is not > 0 || !double.IsFinite(e.DimensionTargetMm.Value))) ||
                 !double.IsFinite(e.TextHeightMm) || e.TextHeightMm is < .5 or > 100 ||
                 !double.IsFinite(e.RotationDegrees) ||
                 (e.Kind == ElementKind.Text ? string.IsNullOrWhiteSpace(e.Text) || e.Text.Length > 4096 : e.Text is not null) ||
@@ -110,6 +145,7 @@ public sealed record DrawingDocument
             Elements.Where(e => e.LinkedElementId is not null).GroupBy(e => e.LinkedElementId).Any(g => g.Count() > 1))
             throw new InvalidDataException("Некоректне посилання текстового позначення.");
         _ = AssociativeDimensions.ResolveAll(Elements);
+        DrivingDimensions.Validate(Elements);
     }
 
     private static bool ValidWire(DrawingElement e)

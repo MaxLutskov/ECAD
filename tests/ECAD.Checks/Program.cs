@@ -222,7 +222,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 7 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == 8 && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Unsupported archive version rejected", () =>
 {
@@ -306,7 +306,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 7);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 8);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -320,6 +320,72 @@ Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
     var pointDimension = dim with { Id = Guid.NewGuid(), StartReference = new(p.Id, ReferenceKind.Vertex, 1) };
     s.Add(pointDimension); Near(s.Document.Elements[^1].LengthMm, 15);
     s.Select(b, false); s.Move(new(0, 5)); Near(s.Document.Elements[^1].LengthMm, 10);
+});
+Check("Driving aligned dimension resizes a line and connected geometry atomically", () =>
+{
+    var line = Line();
+    var wire = Wire(new PointMm(10, 0), new PointMm(10, 20));
+    var node = new DrawingElement(Guid.NewGuid(), ElementKind.Junction, line.B, line.B);
+    var dimension = new DrawingElement(Guid.NewGuid(), ElementKind.Dimension, line.A, line.B)
+    {
+        StartReference = new(line.Id, ReferenceKind.Vertex, 0),
+        EndReference = new(line.Id, ReferenceKind.Vertex, 1),
+        DimensionMode = DimensionMode.Driving, DimensionTargetMm = 24.75
+    };
+    var s = new EditorSession(); s.Apply([line, wire, node, dimension]);
+    Near(s.Document.Elements[0].LengthMm, 24.75);
+    Assert(s.Document.Elements[1].A == new PointMm(24.75, 0));
+    Assert(s.Document.Elements[2].A == new PointMm(24.75, 0));
+    Near(s.Document.Elements[3].DimensionValueMm, 24.75);
+    var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
+    var reopened = ProjectFile.Open(path);
+    Assert(reopened.SchemaVersion == 8 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
+    s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
+});
+Check("Driving horizontal and vertical dimensions resize a rectangle independently", () =>
+{
+    var rectangle = new DrawingElement(Guid.NewGuid(), ElementKind.Rectangle, new(0, 0), new(10, 20));
+    DrawingElement Dimension(int a, int b, DimensionType type, double target) =>
+        new(Guid.NewGuid(), ElementKind.Dimension, default, default)
+        {
+            StartReference = new(rectangle.Id, ReferenceKind.Vertex, a),
+            EndReference = new(rectangle.Id, ReferenceKind.Vertex, b),
+            DimensionType = type, DimensionMode = DimensionMode.Driving, DimensionTargetMm = target
+        };
+    var s = new EditorSession(); s.Apply([rectangle,
+        Dimension(0, 1, DimensionType.Horizontal, 32.5),
+        Dimension(1, 2, DimensionType.Vertical, 17.25)]);
+    var resized = s.Document.Elements[0]; Near(resized.B.X, 32.5); Near(resized.B.Y, 17.25);
+    Near(s.Document.Elements[1].DimensionValueMm, 32.5); Near(s.Document.Elements[2].DimensionValueMm, 17.25);
+});
+Check("Driving diameter resizes a circle and curve references follow", () =>
+{
+    var circle = new DrawingElement(Guid.NewGuid(), ElementKind.Circle, new(10, 10), new(15, 10));
+    var dimension = new DrawingElement(Guid.NewGuid(), ElementKind.Dimension, circle.A, new(10, 15))
+    {
+        StartReference = new(circle.Id, ReferenceKind.Vertex, 0),
+        EndReference = new(circle.Id, ReferenceKind.Curve, 0, .25),
+        DimensionType = DimensionType.Diameter, DimensionMode = DimensionMode.Driving, DimensionTargetMm = 30
+    };
+    var s = new EditorSession(); s.Apply([circle, dimension]);
+    Near(s.Document.Elements[0].LengthMm, 15); Near(s.Document.Elements[1].DimensionValueMm, 30);
+    Near(s.Document.Elements[1].B.X, 10); Near(s.Document.Elements[1].B.Y, 25);
+    var picked = AssociativeDimensions.Pick(s.Document.Elements, new(10.1, 25.1), .5);
+    Assert(picked.Reference?.Kind == ReferenceKind.Curve);
+});
+Check("Conflicting and cross-object driving dimensions are rejected", () =>
+{
+    var line = Line();
+    DrawingElement Driver(double target) => new(Guid.NewGuid(), ElementKind.Dimension, line.A, line.B)
+    {
+        StartReference = new(line.Id, ReferenceKind.Vertex, 0), EndReference = new(line.Id, ReferenceKind.Vertex, 1),
+        DimensionMode = DimensionMode.Driving, DimensionTargetMm = target
+    };
+    Reject(() => new EditorSession().Apply([line, Driver(10), Driver(20)]));
+    var other = Line(10);
+    Reject(() => new EditorSession().Apply([line, other, Driver(10) with
+    { EndReference = new(other.Id, ReferenceKind.Vertex, 1) }]));
 });
 Check("Moving geometry and its dimension together does not double the offset", () =>
 {
@@ -358,6 +424,19 @@ Check("Rotate 90 preserves geometry and associative rectangle references", () =>
     Near(s.Document.Elements[1].LengthMm, 10); Assert(s.Document.Elements[1].A == new PointMm(15, 5));
     s.Undo(); Assert(s.Document.Elements[0] == rectangle); Near(s.Document.Elements[1].LengthMm, 10);
 });
+Check("Rotation swaps horizontal and vertical driving constraints", () =>
+{
+    var rectangle = new DrawingElement(Guid.NewGuid(), ElementKind.Rectangle, new(0, 0), new(30, 20));
+    var dimension = new DrawingElement(Guid.NewGuid(), ElementKind.Dimension, rectangle.A, new(30, 0))
+    {
+        StartReference = new(rectangle.Id, ReferenceKind.Vertex, 0),
+        EndReference = new(rectangle.Id, ReferenceKind.Vertex, 1),
+        DimensionType = DimensionType.Horizontal, DimensionMode = DimensionMode.Driving, DimensionTargetMm = 30
+    };
+    var s = new EditorSession(); s.Apply([rectangle, dimension]); s.Select(rectangle, false); s.RotateSelection90();
+    var rotatedDimension = s.Document.Elements[1];
+    Assert(rotatedDimension.DimensionType == DimensionType.Vertical); Near(rotatedDimension.DimensionValueMm, 30);
+});
 Check("Invalid dimension references and nonparallel edges are rejected", () =>
 {
     var a = Line(); var b = Line(20) with { B = new(5, 25) };
@@ -373,7 +452,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 7); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 8); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -664,6 +743,26 @@ Check("Property panel edits geometry, name and path type as one undoable action"
     Assert(edited.Kind == ElementKind.Wire && edited.Name == "Живлення двигуна" && edited.A == new PointMm(25, 30));
     Near(edited.LengthMm, 40); Near(Geometry.Angle(edited.B - edited.A), 30);
     interactive.Undo(); Assert(interactive.Document.Elements.Single() == source);
+    propertyWindow.Close();
+});
+Check("Property panel turns an associative dimension into a driving constraint", () =>
+{
+    var source = Line();
+    var dimension = new DrawingElement(Guid.NewGuid(), ElementKind.Dimension, source.A, source.B)
+    {
+        StartReference = new(source.Id, ReferenceKind.Vertex, 0), EndReference = new(source.Id, ReferenceKind.Vertex, 1)
+    };
+    interactive.Load(new() { Elements = [source, dimension] }); interactive.Select(dimension, false);
+    var properties = new PropertyPanel(interactive, _ => { });
+    var propertyWindow = new Window { Width = 320, Height = 700, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    var boxes = properties.GetVisualDescendants().OfType<TextBox>().ToArray();
+    boxes.Single(x => x.Name == "PropertyTarget").Text = "27,5";
+    properties.GetVisualDescendants().OfType<ComboBox>().Single(x => x.Name == "PropertyDimensionMode").SelectedIndex = 1;
+    properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    Near(interactive.Document.Elements[0].LengthMm, 27.5);
+    Assert(interactive.Document.Elements[1].DimensionMode == DimensionMode.Driving);
     propertyWindow.Close();
 });
 liveWindow.Close();
