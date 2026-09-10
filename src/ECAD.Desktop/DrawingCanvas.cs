@@ -34,6 +34,7 @@ public sealed class DrawingCanvas : Decorator
     public bool IsDrawing => anchor is not null;
     public double GridStep { get; set; } = 2.5;
     public double ExactLength { get; set; }
+    public double AngleSnapStep { get; private set; }
     public bool SnapEnabled { get; set; } = true;
     public bool GridVisible { get; set; } = true;
     public string ActiveSymbolKey { get; set; } = SymbolLibrary.All[0].Key;
@@ -98,7 +99,7 @@ public sealed class DrawingCanvas : Decorator
     {
         var length = LineInput.FirstValue ?? (ExactLength > 0 ? ExactLength : (end - start).Length);
         if (length <= 1e-9) return start;
-        return Geometry.Polar(start, length, LineInput.SecondValue ?? Geometry.Angle(end - start));
+        return Geometry.Polar(start, length, LineInput.SecondValue ?? SnapAngle(end - start));
     }
 
     private PointMm CircleEndPoint(PointMm start, PointMm end)
@@ -151,6 +152,13 @@ public sealed class DrawingCanvas : Decorator
     }
 
     public void EditSelectedLine() => EditSelectedGeometry();
+
+    public void SetAngleSnap(double step)
+    {
+        if (step is not (0 or 15 or 30 or 45)) throw new ArgumentOutOfRangeException(nameof(step));
+        AngleSnapStep = step; UpdateGeometryInput(); InvalidateVisual();
+        Status?.Invoke(step == 0 ? "Кутова прив’язка вимкнена." : $"Кутова прив’язка: крок {step:0}°.");
+    }
 
     public void CopySelection()
     {
@@ -234,18 +242,25 @@ public sealed class DrawingCanvas : Decorator
         return [elbow, end];
     }
 
+    private PointMm[] PointerWireRoute(PointMm start, PointMm end)
+    {
+        if (AngleSnapStep <= 0) return OrthogonalRoute(start, end);
+        var length = (end - start).Length;
+        return length <= 1e-9 ? [] : [Geometry.Polar(start, length, SnapAngle(end - start))];
+    }
+
     private PointMm[] PreviewWire()
     {
         if (wirePoints.Count == 0) return [];
         if (LineInput.HasInput) return [.. wirePoints, WireInputEnd(wirePoints[^1], cursor)];
-        return [.. wirePoints, .. OrthogonalRoute(wirePoints[^1], cursor)];
+        return [.. wirePoints, .. PointerWireRoute(wirePoints[^1], cursor)];
     }
 
     private PointMm WireInputEnd(PointMm start, PointMm end)
     {
         var delta = end - start;
-        var angle = LineInput.SecondValue ?? CardinalAngle(delta);
-        var length = LineInput.FirstValue ?? ProjectedCardinalLength(delta, angle);
+        var angle = LineInput.SecondValue ?? (AngleSnapStep > 0 ? SnapAngle(delta) : CardinalAngle(delta));
+        var length = LineInput.FirstValue ?? delta.Length;
         if (length <= 1e-9) return start;
         return Geometry.Polar(start, length, angle);
     }
@@ -254,10 +269,10 @@ public sealed class DrawingCanvas : Decorator
         ? delta.X < 0 ? 180 : 0
         : delta.Y < 0 ? 90 : 270;
 
-    private static double ProjectedCardinalLength(PointMm delta, double angle)
+    private double SnapAngle(PointMm delta)
     {
-        var normalized = ((angle % 360) + 360) % 360;
-        return normalized is 0 or 180 ? Math.Abs(delta.X) : Math.Abs(delta.Y);
+        var angle = Geometry.Angle(delta);
+        return AngleSnapStep > 0 ? Math.Round(angle / AngleSnapStep, MidpointRounding.AwayFromZero) * AngleSnapStep : angle;
     }
 
     private void AddWirePoint(GeometryPick pick, bool finish)
@@ -271,7 +286,7 @@ public sealed class DrawingCanvas : Decorator
         }
         if (LineInput.HasInput && !LineInput.Valid)
         { Status?.Invoke("Виправ довжину або кут точного сегмента."); return; }
-        var route = LineInput.HasInput ? new[] { WireInputEnd(wirePoints[^1], pick.Point) } : OrthogonalRoute(wirePoints[^1], pick.Point);
+        var route = LineInput.HasInput ? new[] { WireInputEnd(wirePoints[^1], pick.Point) } : PointerWireRoute(wirePoints[^1], pick.Point);
         foreach (var point in route)
             if (point != wirePoints[^1]) wirePoints.Add(point);
         anchor = wirePoints[^1];

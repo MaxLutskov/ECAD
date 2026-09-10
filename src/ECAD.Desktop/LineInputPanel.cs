@@ -88,8 +88,7 @@ public sealed class LineInputPanel : Border
             ElementKind.Circle => (!lengthLocked || Length is > 0 and <= 5000) &&
                 (!angleLocked || Angle is > 0 and <= 10000),
             ElementKind.Wire => (!lengthLocked || Length is > 0 and <= 10000) &&
-                (!angleLocked || Angle is >= -36000 and <= 36000 &&
-                    Math.Abs(Angle.Value / 90 - Math.Round(Angle.Value / 90)) < 1e-9),
+                (!angleLocked || Angle is >= -36000 and <= 36000),
             _ => false
         };
         BorderBrush = Valid ? Brushes.Teal : Brushes.IndianRed;
@@ -98,7 +97,7 @@ public sealed class LineInputPanel : Border
             ElementKind.Line => "Довжина: 0…10000 мм (>0). Кут: число.",
             ElementKind.Rectangle => "Ширина й висота: 0…10000 мм (>0).",
             ElementKind.Circle => "Радіус або діаметр має бути більшим за 0.",
-            ElementKind.Wire => "Довжина: >0. Кут провідника: 0°, 90°, 180° або 270°.",
+            ElementKind.Wire => "Довжина: 0…10000 мм (>0). Кут: число.",
             _ => "Некоректне значення."
         };
     }
@@ -160,7 +159,7 @@ public sealed class LineInputPanel : Border
             ElementKind.Line => ("Довжина, мм", "Кут, °"),
             ElementKind.Rectangle => ("Ширина, мм", "Висота, мм"),
             ElementKind.Circle => ("Радіус, мм", "Діаметр, мм"),
-            ElementKind.Wire => ("Довжина сегмента, мм", "Кут, ° (кратно 90)"),
+            ElementKind.Wire => ("Довжина сегмента, мм", "Кут, °"),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
     }

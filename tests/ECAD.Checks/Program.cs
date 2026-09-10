@@ -61,14 +61,15 @@ Check("Junction and text point elements validate, hit and rotate", () =>
     Near(s.Document.Elements[1].RotationDegrees, 90);
     Reject(() => new DrawingDocument { Elements = [label with { Text = "" }] }.Validate());
 });
-Check("Orthogonal wires validate, move and rotate with all vertices", () =>
+Check("Arbitrary-angle wires validate, move and rotate with all vertices", () =>
 {
     var wire = Wire(new(0, 0), new(10, 0), new(10, 20));
     new DrawingDocument { Elements = [wire] }.Validate();
+    new DrawingDocument { Elements = [Wire(new(0, 0), new(10, 10))] }.Validate();
     var moved = wire.Move(new(5, 7)); Assert(moved.Points![1] == new PointMm(15, 7));
     var s = new EditorSession(); s.Add(wire); s.Select(wire, false); s.RotateSelection90();
     Assert(s.Document.Elements[0].Points!.SequenceEqual([new PointMm(15, 5), new(15, 15), new(-5, 15)]));
-    Reject(() => new DrawingDocument { Elements = [Wire(new(0, 0), new(10, 10))] }.Validate());
+    Reject(() => new DrawingDocument { Elements = [Wire(new(0, 0), new(0, 0))] }.Validate());
 });
 Check("Wire crossings require a junction and shared endpoints connect directly", () =>
 {
@@ -389,6 +390,19 @@ Check("Line supports start point to end point with a second click", () =>
     Near(interactive.Document.Elements[0].B.X, 192.5);
     Near(interactive.Document.Elements[0].B.Y, 110);
 });
+Check("Angle step modes snap pointer lines and wires to selected increments", () =>
+{
+    interactive.Load(new()); liveCanvas.SetAngleSnap(30); liveCanvas.SetTool(ElementKind.Line);
+    Tap(180, 180); liveWindow.MouseMove(new(300, 110)); Tap(300, 110);
+    Near(Geometry.Angle(interactive.Document.Elements.Single().B - interactive.Document.Elements.Single().A), 30);
+
+    interactive.Load(new()); liveCanvas.SetAngleSnap(45); liveCanvas.SetTool(ElementKind.Wire);
+    Tap(180, 180); liveWindow.MouseMove(new(300, 60)); Tap(300, 60);
+    liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+    var wire = interactive.Document.Elements.Single();
+    Assert(wire.Points!.Length == 2); Near(Geometry.Angle(wire.B - wire.A), 45);
+    liveCanvas.SetAngleSnap(0);
+});
 Check("Floating input: type length, Tab, angle and Enter", () =>
 {
     interactive.Load(new()); liveCanvas.SetTool(ElementKind.Line); Tap(60, 60); liveWindow.MouseMove(new(240, 160));
@@ -499,9 +513,9 @@ Check("Pointer tool builds an orthogonal multi-segment wire", () =>
     Assert(wire.Kind == ElementKind.Wire);
     Assert(wire.Points!.SequenceEqual([new PointMm(10, 10), new(50, 10), new(50, 30)]));
 });
-Check("Wire supports consecutive exact length and orthogonal angle segments", () =>
+Check("Wire supports consecutive exact segments at arbitrary angles", () =>
 {
-    interactive.Load(new()); liveCanvas.SetTool(ElementKind.Wire); Tap(60, 60); liveWindow.MouseMove(new(240, 60));
+    interactive.Load(new()); liveCanvas.SetAngleSnap(15); liveCanvas.SetTool(ElementKind.Wire); Tap(60, 60); liveWindow.MouseMove(new(240, 60));
     liveWindow.KeyTextInput("12.3");
     liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
     liveWindow.KeyTextInput("0");
@@ -509,14 +523,16 @@ Check("Wire supports consecutive exact length and orthogonal angle segments", ()
     Assert(interactive.Document.Elements.Length == 0 && liveCanvas.IsDrawing);
     liveWindow.KeyTextInput("7.2");
     liveWindow.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Tab, RawInputModifiers.None);
-    liveWindow.KeyTextInput("90");
+    liveWindow.KeyTextInput("37");
     liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
     liveWindow.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None); liveWindow.KeyReleaseQwerty(PhysicalKey.Enter, RawInputModifiers.None);
     var exactWire = interactive.Document.Elements.Single();
     var exactPoints = exactWire.Points ?? throw new Exception("Wire points missing");
     Assert(exactWire.Kind == ElementKind.Wire && exactPoints.Length == 3);
     Assert(exactPoints[0] == new PointMm(10, 10)); Near(exactPoints[1].X, 22.3); Near(exactPoints[1].Y, 10);
-    Near(exactPoints[2].X, 22.3); Near(exactPoints[2].Y, 2.8);
+    var expected = Geometry.Polar(exactPoints[1], 7.2, 37);
+    Near(exactPoints[2].X, expected.X); Near(exactPoints[2].Y, expected.Y);
+    liveCanvas.SetAngleSnap(0);
 });
 Check("Pointer places a selected IEC symbol and renders its contacts", () =>
 {

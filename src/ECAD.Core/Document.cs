@@ -115,8 +115,7 @@ public sealed record DrawingDocument
         if (e.Kind != ElementKind.Wire) return e.Points is null;
         if (e.Points is not { Length: >= 2 and <= 10000 } points || points.Any(p => !p.IsFinite) ||
             points[0] != e.A || points[^1] != e.B) return false;
-        return points.Zip(points.Skip(1)).All(pair =>
-            (pair.First.X == pair.Second.X || pair.First.Y == pair.Second.Y) && pair.First != pair.Second);
+        return points.Zip(points.Skip(1)).All(pair => pair.First != pair.Second);
     }
 
     private static bool ValidSymbol(DrawingElement e, HashSet<string> symbolKeys)
