@@ -16,7 +16,11 @@
 | Пакування | Окремі App/Libraries/Projects, два приклади бібліотек і схема; повторна збірка створює нову папку, sentinel-перевірка захищає попередні файли |
 | Версія та automation | Directory.Build.props — єдине джерело; AppInfo/UI/log/package; Verify.ps1 та GitHub Windows/Ubuntu 24.04 matrix |
 
-Локальний Release: 123 checks та PowerShell-перевірка пакування. Команда: `./scripts/Verify.ps1`. SDK локально 10.0.400-preview.0.26322.102, runtime 10.0.9; попередження NETSDK1057 повідомляє про preview SDK. CI використовує stable 10.0.x. Фактичний віддалений результат буде зафіксовано після завершення запуску.
+Локальний Release: 123 checks та PowerShell-перевірка пакування, 0 warnings/errors. Команда: `./scripts/Verify.ps1`. SDK локально 10.0.400-preview.0.26322.102, runtime 10.0.9; інформаційне повідомлення NETSDK1057 вказує на preview SDK.
+
+Віддалений [GitHub Actions run 34593470211](https://github.com/MaxLutskov/ECAD/actions/runs/34593470211) для коміту `f2c1bde` успішний: Windows — 2 хв 14 с, Ubuntu 24.04 — 45 с. Обидва виконали Release build, 123 checks та перевірку пакування зі stable .NET 10. Це фактичний headless CI, а не лише підготовлений workflow.
+
+Пакети з того самого коміту зібрано в `output/v0.18/win-x64` і `output/v0.18/linux-x64`. Версія Windows binary — `0.18.0.0`, ProductVersion — `0.18+f2c1bde76c002ef6ce2cb1d10047511528e1b6c3`. У корені лише launcher/README та папки App/Libraries/Projects; обидва пакети включають бібліотеки й приклад schema 13. Пакети потребують .NET 10 Runtime.
 
 ## Діагностика швидкодії
 
