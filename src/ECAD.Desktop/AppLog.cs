@@ -14,7 +14,7 @@ public static class AppLog
         {
             var directory = Path.GetDirectoryName(LogPath);
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-            var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown";
+            var version = AppInfo.BuildVersion;
             var entry = new StringBuilder()
                 .AppendLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] ECAD {version}")
                 .AppendLine(context)

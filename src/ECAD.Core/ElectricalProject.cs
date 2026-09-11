@@ -37,7 +37,6 @@ public static class ElectricalProjectModel
         var deviceByTag = new Dictionary<string, ProjectDevice>(StringComparer.OrdinalIgnoreCase);
         foreach (var device in devices)
             if (!deviceByTag.ContainsKey(device.Tag)) deviceByTag.Add(device.Tag, device);
-        var usedFunctionIds = new HashSet<Guid>();
         var pages = new List<DrawingPage>();
 
         foreach (var page in document.Pages.OrderBy(page => page.Number))
@@ -57,29 +56,18 @@ public static class ElectricalProjectModel
 
                 var function = element.DeviceFunctionId is { } functionId
                     ? device.Functions.FirstOrDefault(item => item.Id == functionId) : null;
-                if (function is null || usedFunctionIds.Contains(function.Id))
+                if (element.DeviceFunctionId is not null && function is null)
+                    throw new InvalidDataException("Функція символу не належить його пристрою.");
+                if (function is null)
                 {
                     function = CreateFunction(element, device.Functions.Length + 1);
                     device = device with { Functions = [.. device.Functions, function] };
                     var deviceIndex = devices.FindIndex(item => item.Id == device.Id); devices[deviceIndex] = device;
                     deviceByTag[tag] = device;
                 }
-                usedFunctionIds.Add(function.Id);
                 elements[index] = element with { DeviceId = device.Id, DeviceFunctionId = function.Id };
             }
 
-            var connectivity = ElectricalConnectivity.Build(elements);
-            var claimedNets = new HashSet<Guid>();
-            foreach (var connected in connectivity)
-            {
-                var wireIndexes = connected.WireIds.Select(id => Array.FindIndex(elements, item => item.Id == id)).ToArray();
-                var existing = wireIndexes.Select(index => elements[index].NetId).OfType<Guid>()
-                    .FirstOrDefault(id => !claimedNets.Contains(id) && nets.Any(net => net.Id == id));
-                var netId = existing == Guid.Empty ? Guid.NewGuid() : existing;
-                if (!nets.Any(net => net.Id == netId)) nets.Add(new(netId, NextNetNumber(nets)));
-                claimedNets.Add(netId);
-                foreach (var wireIndex in wireIndexes) elements[wireIndex] = elements[wireIndex] with { NetId = netId };
-            }
             pages.Add(page with { Elements = elements });
         }
 
@@ -107,11 +95,11 @@ public static class ElectricalProjectModel
                 devices[deviceIndex] = device with { ComponentVariantId = modeled.ComponentVariantId, PhysicalRepresentationId = modeled.PhysicalRepresentationId };
         }
         var active = pages.Single(page => page.Id == document.ActivePageId);
-        return document with
+        return NetReconciliation.Apply(document with
         {
-            SchemaVersion = 12, Devices = [.. devices], Nets = [.. nets], Pages = [.. pages],
+            SchemaVersion = DocumentFormat.Current, Devices = [.. devices], Nets = [.. nets], Pages = [.. pages],
             Elements = active.Elements, WidthMm = active.WidthMm, HeightMm = active.HeightMm
-        };
+        });
     }
 
     public static void Validate(DrawingDocument document)
@@ -166,12 +154,20 @@ public static class ElectricalProjectModel
                     !Enum.IsDefined(core.Status) || core.NetId is { } netId && !netIds.Contains(netId) ||
                     core.FromElementId is { } from && !elementIds.Contains(from) || core.ToElementId is { } to && !elementIds.Contains(to)) throw Invalid();
         }
-        var functions = document.Devices.SelectMany(device => device.Functions).Select(function => function.Id).ToHashSet();
+        var functions = document.Devices.SelectMany(device => device.Functions.Select(function => (function.Id, DeviceId: device.Id)))
+            .ToDictionary(item => item.Id, item => item.DeviceId);
+        var variants = ComponentCatalog.Variants(document).ToDictionary(item => item.Variant.Id, item => item.Variant);
+        foreach (var device in document.Devices)
+            if (device.ComponentVariantId is { } variantId
+                ? !variants.TryGetValue(variantId, out var variant) || device.PhysicalRepresentationId is { } physicalId &&
+                    !variant.PhysicalRepresentations.Any(physical => physical.Id == physicalId)
+                : device.PhysicalRepresentationId is not null)
+                throw Invalid();
         var devicesById = document.Devices.ToDictionary(device => device.Id);
         foreach (var element in document.Pages.SelectMany(page => page.Elements))
             if (element.Kind == ElementKind.Symbol && (element.DeviceId is { } deviceId && (!devicesById.TryGetValue(deviceId, out var device) ||
                     !string.Equals(device.Tag, element.DeviceTag, StringComparison.OrdinalIgnoreCase)) ||
-                    element.DeviceFunctionId is { } functionId && !functions.Contains(functionId) || element.TerminalId is { } terminalId && !terminalIds.Contains(terminalId)) ||
+                    element.DeviceFunctionId is { } functionId && (!functions.TryGetValue(functionId, out var ownerId) || ownerId != element.DeviceId) || element.TerminalId is { } terminalId && !terminalIds.Contains(terminalId)) ||
                 element.Kind == ElementKind.Wire && element.NetId is { } wireNetId && !netIds.Contains(wireNetId) ||
                 element.Kind != ElementKind.Symbol && (element.DeviceId is not null || element.DeviceFunctionId is not null || element.TerminalId is not null) ||
                 element.Kind != ElementKind.Wire && element.NetId is not null)
@@ -201,13 +197,6 @@ public static class ElectricalProjectModel
         };
         var name = SymbolLibrary.TryGet(element.SymbolKey!, out var definition) ? definition.Name : element.SymbolKey!;
         return new(Guid.NewGuid(), $"{element.SymbolKey}:{sequence}", name, kind, terminals);
-    }
-
-    private static string NextNetNumber(IEnumerable<ProjectNet> nets)
-    {
-        var used = nets.Select(net => net.Number).ToHashSet(StringComparer.OrdinalIgnoreCase); var number = 1;
-        while (used.Contains(number.ToString())) number++;
-        return number.ToString();
     }
 
     private static InvalidDataException Invalid() => new("Некоректна електрична модель проєкту.");

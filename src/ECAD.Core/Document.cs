@@ -109,12 +109,40 @@ public sealed record DrawingElement(Guid Id, ElementKind Kind, PointMm A, PointM
 
 public sealed record DrawingDocument
 {
-    public int SchemaVersion { get; init; } = 12;
-    public double WidthMm { get; init; } = 420;
-    public double HeightMm { get; init; } = 297;
-    public DrawingElement[] Elements { get; init; } = [];
+    public int SchemaVersion { get; init; } = DocumentFormat.Current;
+    // Unpaged fields are only a construction adapter. Once Pages is assigned,
+    // geometry and dimensions have exactly one owner: the active DrawingPage.
+    private double unpagedWidth = 420;
+    private double unpagedHeight = 297;
+    private DrawingElement[] unpagedElements = [];
+    private DrawingPage[] pages = [];
+    private DrawingPage? Active => pages?.FirstOrDefault(page => page is not null && page.Id == ActivePageId);
+    public double WidthMm
+    {
+        get => Active?.WidthMm ?? unpagedWidth;
+        init { if (Active is { } active) Replace(active with { WidthMm = value }); else unpagedWidth = value; }
+    }
+    public double HeightMm
+    {
+        get => Active?.HeightMm ?? unpagedHeight;
+        init { if (Active is { } active) Replace(active with { HeightMm = value }); else unpagedHeight = value; }
+    }
+    public DrawingElement[] Elements
+    {
+        get => Active?.Elements ?? unpagedElements;
+        init { if (Active is { } active) Replace(active with { Elements = value }); else unpagedElements = value; }
+    }
     public Guid ActivePageId { get; init; }
-    public DrawingPage[] Pages { get; init; } = [];
+    public DrawingPage[] Pages
+    {
+        get => pages;
+        init
+        {
+            pages = value;
+            if (pages is { Length: > 0 }) { unpagedElements = []; unpagedWidth = 0; unpagedHeight = 0; }
+        }
+    }
+    private void Replace(DrawingPage page) => pages = pages.Select(item => item.Id == page.Id ? page : item).ToArray();
     public CrossPageReference[] CrossPageReferences { get; init; } = [];
     public ProjectDevice[] Devices { get; init; } = [];
     public ProjectNet[] Nets { get; init; } = [];
@@ -125,7 +153,7 @@ public sealed record DrawingDocument
 
     public void Validate()
     {
-        if (SchemaVersion is < 1 or > 12) throw new InvalidDataException("Непідтримувана версія документа.");
+        if (SchemaVersion is < 1 or > DocumentFormat.Current) throw new InvalidDataException("Непідтримувана версія документа.");
         if (Pages is null || Pages.Length > 100 || CrossPageReferences is null || CrossPageReferences.Length > 10000)
             throw new InvalidDataException("Некоректна структура сторінок.");
         if (Pages.Length > 0)

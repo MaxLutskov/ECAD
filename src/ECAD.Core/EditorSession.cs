@@ -4,11 +4,13 @@ namespace ECAD.Core;
 // differential commands if profiling large drawings shows a memory bottleneck.
 public sealed class EditorSession
 {
-    private readonly List<DrawingDocument> undo = [];
-    private readonly Stack<DrawingDocument> redo = [];
+    private readonly List<HistorySnapshot> undo = [];
+    private readonly Stack<HistorySnapshot> redo = [];
+    private HistorySnapshot? currentSnapshot;
     private DrawingElement[] clipboard = [];
     private int pasteCount;
     public DrawingDocument Document { get; private set; } = ElectricalProjectModel.Normalize(new());
+    public Guid ContentRevision { get; private set; } = Guid.NewGuid();
     public HashSet<Guid> Selection { get; } = [];
     public bool CanUndo => undo.Count > 0;
     public bool CanRedo => redo.Count > 0;
@@ -18,27 +20,34 @@ public sealed class EditorSession
 
     public void Load(DrawingDocument document)
     {
+        DocumentStructure.Validate(document);
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
         document = Normalize(document);
         Document = document;
+        ContentRevision = Guid.NewGuid();
+        currentSnapshot = new(Document, ContentRevision);
         undo.Clear(); redo.Clear(); Selection.Clear(); Changed?.Invoke();
     }
 
     public void Apply(DrawingElement[] elements)
     {
         var next = Normalize(Document with { Elements = [.. elements] });
-        if (Document.Elements.SequenceEqual(next.Elements)) return;
-        undo.Add(Document);
-        if (undo.Count > 200) undo.RemoveAt(0);
-        Document = next; redo.Clear(); Notify();
+        Commit(next);
     }
 
     public void ApplyDocument(DrawingDocument document)
     {
         document = Normalize(document);
-        if (ReferenceEquals(Document, document)) return;
-        undo.Add(Document); if (undo.Count > 200) undo.RemoveAt(0);
+        Commit(document);
+    }
+
+    private void Commit(DrawingDocument document)
+    {
+        if (DocumentContent.Equals(Document, document)) return;
+        undo.Add(new(Document, ContentRevision)); if (undo.Count > 200) undo.RemoveAt(0);
         Document = document;
+        ContentRevision = Guid.NewGuid();
+        currentSnapshot = new(Document, ContentRevision);
         redo.Clear(); Notify();
     }
 
@@ -66,10 +75,10 @@ public sealed class EditorSession
         if (pageId == Document.ActivePageId) return;
         var page = Document.Pages.SingleOrDefault(item => item.Id == pageId)
             ?? throw new InvalidDataException("Не знайдено аркуш.");
-        Document = Normalize(Document with
+        Document = Document with
         {
             ActivePageId = page.Id, WidthMm = page.WidthMm, HeightMm = page.HeightMm, Elements = page.Elements
-        });
+        };
         Selection.Clear(); Changed?.Invoke();
     }
 
@@ -178,9 +187,8 @@ public sealed class EditorSession
 
     public void RenumberNets(string prefix = "", int start = 1, int step = 1)
     {
-        if (start < 0 || step < 1) throw new InvalidDataException("Некоректні параметри нумерації.");
-        var next = start;
-        var nets = Document.Nets.Select(net => net.NumberLocked ? net : net with { Number = prefix + next++ }).ToArray();
+        var nets = NetNumbering.Renumber(Document.Nets, prefix, start, step);
+        if (Document.Nets.SequenceEqual(nets)) return;
         ApplyDocument(Document with { Nets = nets });
     }
 
@@ -221,6 +229,34 @@ public sealed class EditorSession
     {
         if (!Document.Cables.Any(item => item.Id == cable.Id)) throw new InvalidDataException("Не знайдено кабель.");
         ApplyDocument(Document with { Cables = Document.Cables.Select(item => item.Id == cable.Id ? cable : item).ToArray() });
+    }
+
+    public void SetTerminalNet(Guid terminalId, Guid? netId)
+    {
+        ValidateNetAssignment(netId);
+        var terminal = Document.TerminalStrips.SelectMany(strip => strip.Terminals).SingleOrDefault(item => item.Id == terminalId)
+            ?? throw new InvalidDataException("Не знайдено клему.");
+        if (terminal.NetId == netId) return;
+        ApplyDocument(Document with { TerminalStrips = Document.TerminalStrips.Select(strip => strip with
+        { Terminals = strip.Terminals.Select(item => item.Id == terminalId ? item with { NetId = netId } : item).ToArray() }).ToArray() });
+    }
+
+    public void SetCableCoreNet(Guid coreId, Guid? netId)
+    {
+        ValidateNetAssignment(netId);
+        var core = Document.Cables.SelectMany(cable => cable.Cores).SingleOrDefault(item => item.Id == coreId)
+            ?? throw new InvalidDataException("Не знайдено жилу.");
+        var status = core.Status == CableCoreStatus.ProtectiveEarth ? core.Status
+            : netId is null ? CableCoreStatus.Spare : CableCoreStatus.Used;
+        if (core.NetId == netId && core.Status == status) return;
+        ApplyDocument(Document with { Cables = Document.Cables.Select(cable => cable with
+        { Cores = cable.Cores.Select(item => item.Id == coreId ? item with { NetId = netId, Status = status } : item).ToArray() }).ToArray() });
+    }
+
+    private void ValidateNetAssignment(Guid? netId)
+    {
+        if (netId is { } id && !Document.Nets.Any(net => net.Id == id))
+            throw new InvalidDataException("Не знайдено електричне коло.");
     }
 
     public SymbolDefinition CreateCustomSymbol(string name, string prefix)
@@ -269,31 +305,8 @@ public sealed class EditorSession
             ?? throw new InvalidDataException("Не знайдено бібліотеку.");
         var symbolKeys = SymbolLibrary.Definitions(Document).Select(item => item.Key).ToHashSet(StringComparer.Ordinal);
         ComponentCatalog.Validate([library], symbolKeys);
-        var previousVariants = ComponentCatalog.Variants(Document)
-            .Where(item => item.Library.Id == previous.Id).ToDictionary(item => item.Variant.Id, item => item.Variant);
-        var nextVariants = library.DeviceTypes.SelectMany(type => type.Families)
-            .SelectMany(family => family.Variants).ToDictionary(item => item.Id);
-        var linked = Document.Elements.Where(item => item.ComponentVariantId is not null).ToArray();
-        if (linked.Any(item => !nextVariants.ContainsKey(item.ComponentVariantId!.Value) &&
-            previousVariants.ContainsKey(item.ComponentVariantId.Value)))
-            throw new InvalidDataException("Не можна видалити варіант, який використовується на схемі.");
-        foreach (var item in linked.Where(item => item.ComponentVariantId is { } id && nextVariants.ContainsKey(id)))
-            if (nextVariants[item.ComponentVariantId!.Value].SymbolKey != item.SymbolKey)
-                throw new InvalidDataException("Не можна змінити умовне позначення варіанта, який використовується на схемі.");
-
         library = library with { Version = checked(previous.Version + 1) };
-        var elements = Document.Elements.Select(item =>
-        {
-            if (item.ComponentVariantId is not { } variantId || !nextVariants.TryGetValue(variantId, out var variant)) return item;
-            return item.PhysicalRepresentationId is { } physicalId &&
-                variant.PhysicalRepresentations.Any(physical => physical.Id == physicalId)
-                ? item : item with { PhysicalRepresentationId = variant.PhysicalRepresentations[0].Id };
-        }).ToArray();
-        ApplyDocument(Document with
-        {
-            ComponentLibraries = Document.ComponentLibraries.Select(item => item.Id == library.Id ? library : item).ToArray(),
-            Elements = elements
-        });
+        ApplyDocument(LibraryUsage.Update(Document, previous, library));
     }
 
     public void DeleteComponentLibrary(Guid libraryId)
@@ -302,7 +315,7 @@ public sealed class EditorSession
             ?? throw new InvalidDataException("Не знайдено бібліотеку.");
         var variantIds = library.DeviceTypes.SelectMany(type => type.Families).SelectMany(family => family.Variants)
             .Select(variant => variant.Id).ToHashSet();
-        if (Document.Elements.Any(item => item.ComponentVariantId is { } id && variantIds.Contains(id)))
+        if (LibraryUsage.UsesAny(Document, variantIds))
             throw new InvalidDataException("Не можна видалити бібліотеку, варіанти якої використані на схемі.");
         ApplyDocument(Document with { ComponentLibraries = Document.ComponentLibraries.Where(item => item.Id != libraryId).ToArray() });
     }
@@ -376,10 +389,8 @@ public sealed class EditorSession
     }
 
     public void Add(DrawingElement element) => Apply([.. Document.Elements, element]);
-    public void Delete() => Apply(Document.Elements.Where(e => !Selection.Contains(e.Id) &&
-        !(e.LinkedElementId is { } owner && Selection.Contains(owner)) &&
-        !(e.StartReference is { } a && Selection.Contains(a.ElementId)) &&
-        !(e.EndReference is { } b && Selection.Contains(b.ElementId))).ToArray());
+    public void Delete() => ApplyDocument(ProjectMaintenance.DeleteElements(Document, Selection));
+    public void RemoveUnusedNets() => ApplyDocument(ProjectMaintenance.RemoveUnusedNets(Document));
     public DrawingElement[] PreviewMove(PointMm delta) => AssociativeDimensions.ResolveAll(Document.Elements.Select(e =>
     {
         var followsOwner = e.LinkedElementId is { } owner && Selection.Contains(owner);
@@ -447,6 +458,9 @@ public sealed class EditorSession
         var copies = clipboard.Select(e => e with
         {
             Id = ids[e.Id],
+            // Paste explicitly creates another function of the same device.
+            // Loading/normalizing an existing function must never do this implicitly.
+            DeviceFunctionId = e.Kind == ElementKind.Symbol ? null : e.DeviceFunctionId,
             GroupId = e.GroupId is { } group ? groupIds[group] : null,
             A = e.A + offset,
             B = e.B + offset,
@@ -540,12 +554,16 @@ public sealed class EditorSession
     public void Undo()
     {
         if (!CanUndo) return;
-        redo.Push(Document); Document = undo[^1]; undo.RemoveAt(undo.Count - 1); Notify();
+        redo.Push(currentSnapshot ?? new(Document, ContentRevision));
+        currentSnapshot = undo[^1];
+        (Document, ContentRevision) = currentSnapshot.Restore(); undo.RemoveAt(undo.Count - 1); Notify();
     }
     public void Redo()
     {
         if (!CanRedo) return;
-        undo.Add(Document); Document = redo.Pop(); Notify();
+        undo.Add(currentSnapshot ?? new(Document, ContentRevision));
+        currentSnapshot = redo.Pop();
+        (Document, ContentRevision) = currentSnapshot.Restore(); Notify();
     }
     private void Notify()
     {
@@ -554,10 +572,11 @@ public sealed class EditorSession
 
     private static DrawingDocument Normalize(DrawingDocument document)
     {
-        if (document.SchemaVersion is < 1 or > 12)
+        DocumentStructure.Validate(document);
+        if (document.SchemaVersion is < 1 or > DocumentFormat.Current)
             throw new InvalidDataException("Непідтримувана версія документа.");
         var elements = DrivingDimensions.ApplyAll(document.Elements);
-        var normalized = ElectricalProjectModel.Normalize(document with { SchemaVersion = 12, Elements = elements });
+        var normalized = ElectricalProjectModel.Normalize(document with { SchemaVersion = DocumentFormat.Current, Elements = elements });
         normalized.Validate();
         return normalized;
     }

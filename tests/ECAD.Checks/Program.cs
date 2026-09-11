@@ -8,7 +8,13 @@ using Avalonia.VisualTree;
 using ECAD.Core;
 using ECAD.Desktop;
 
+if (args.Contains("--profile")) { ECAD.Checks.PerformanceProbe.Run(); return; }
 var passed = 0;
+ECAD.Checks.StabilizationChecks.Run(Check);
+ECAD.Checks.NetReconciliationChecks.Run(Check);
+ECAD.Checks.FileValidationChecks.Run(Check);
+ECAD.Checks.MigrationFixtureChecks.Run(Check);
+ECAD.Checks.ReleaseReadinessChecks.Run(Check);
 void Check(string name, Action action) { action(); passed++; Console.WriteLine("PASS " + name); }
 void Assert(bool value) { if (!value) throw new Exception("Assertion failed"); }
 void Near(double actual, double expected) => Assert(Math.Abs(actual - expected) < 1e-9);
@@ -244,6 +250,7 @@ Check("Application errors are persisted with context and exception details", () 
     Assert(content.Contains("Створення тестового символу", StringComparison.Ordinal));
     Assert(content.Contains("InvalidOperationException", StringComparison.Ordinal));
     Assert(content.Contains("Тестова помилка", StringComparison.Ordinal));
+    Assert(content.Contains($"ECAD {AppInfo.BuildVersion}", StringComparison.Ordinal));
 });
 Check("ZIP round-trip preserves geometry and groups, overwrite remains readable", () =>
 {
@@ -283,7 +290,7 @@ Check("Version 5 symbol tags migrate to independent text labels", () =>
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 5, Elements = [symbol] }));
     var read = ProjectFile.Open(path);
     var label = read.Elements.Single(e => e.LinkedElementId == symbol.Id);
-    Assert(read.SchemaVersion == 12 && label.Text == "M1" && label.Kind == ElementKind.Text);
+    Assert(read.SchemaVersion == DocumentFormat.Current && label.Text == "M1" && label.Kind == ElementKind.Text);
 });
 Check("Pages keep independent geometry, formats and title blocks in one project", () =>
 {
@@ -298,7 +305,7 @@ Check("Pages keep independent geometry, formats and title blocks in one project"
     s.SwitchPage(second); Assert(s.Document.Elements.Single().A.Y == 20);
     var path = Path.Combine(output, "multipage.ecad"); ProjectFile.Save(path, s.Document);
     var read = ProjectFile.Open(path);
-    Assert(read.SchemaVersion == 12 && read.Pages.Length == 2 && read.CrossPageReferences.Length == 0);
+    Assert(read.SchemaVersion == DocumentFormat.Current && read.Pages.Length == 2 && read.CrossPageReferences.Length == 0);
     Assert(read.Pages.Single(page => page.Id == first).Elements.Single().A.Y == 0);
     Assert(read.Pages.Single(page => page.Id == second).Elements.Single().A.Y == 20);
     s.DeletePage(second); Assert(s.Document.Pages.Length == 1); s.Undo(); Assert(s.Document.Pages.Length == 2);
@@ -358,7 +365,7 @@ Check("Complete electrical example includes every 0.17 model and round-trips", (
     Assert(example.TerminalStrips.Single().Terminals.Length == 4 && example.Cables.Single().Cores.Length == 4);
     Assert(example.CrossPageReferences.Length == 1 && example.ComponentLibraries.Length == 2);
     var path = Path.Combine(output, "complete-electrical-demo.ecad"); ProjectFile.Save(path, example);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12 && read.Cables.Single().Tag == "W1");
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == DocumentFormat.Current && read.Cables.Single().Tag == "W1");
     var distributed = ProjectFile.Open(Path.Combine("examples", "projects", "complete-electrical-demo.ecad"));
     Assert(distributed.Pages.Length == 2 && distributed.Devices.Any(device => device.Tag == "KM1"));
 });
@@ -401,7 +408,7 @@ Check("Device catalog supports arbitrary configuration axes and physical variant
 
     var path = Path.Combine(output, "device-catalog.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path); var restored = ComponentCatalog.FindVariant(reopened, variant.Id)!;
-    Assert(reopened.SchemaVersion == 12 && restored.Variant.PhysicalRepresentations.Length == 2);
+    Assert(reopened.SchemaVersion == DocumentFormat.Current && restored.Variant.PhysicalRepresentations.Length == 2);
     Assert(reopened.Elements.Single().ComponentVariantId == variant.Id);
     s.Undo(); Assert(s.Document.Elements.Single().ComponentVariantId is null);
     s.Redo(); Assert(s.Document.Elements.Single().ComponentVariantId == variant.Id);
@@ -560,7 +567,7 @@ Check("Endpoint dimensions follow resizing, delete and undo atomically", () =>
     s.Select(s.Document.Elements[0], false); s.Delete(); Assert(s.Document.Elements.Length == 0);
     s.Undo(); Near(s.Document.Elements[1].LengthMm, 23.7);
     var path = Path.Combine(output, "associative.ecad"); ProjectFile.Save(path, s.Document);
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == DocumentFormat.Current);
     Assert(read.Elements[1].StartReference == dim.StartReference);
 });
 Check("Parallel edge and point-to-edge distances remain perpendicular", () =>
@@ -593,7 +600,7 @@ Check("Driving aligned dimension resizes a line and connected geometry atomicall
     Near(s.Document.Elements[3].DimensionValueMm, 24.75);
     var path = Path.Combine(output, "driving-dimension.ecad"); ProjectFile.Save(path, s.Document);
     var reopened = ProjectFile.Open(path);
-    Assert(reopened.SchemaVersion == 12 && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
+    Assert(reopened.SchemaVersion == DocumentFormat.Current && reopened.Elements[3].DimensionMode == DimensionMode.Driving);
     Near(reopened.Elements[3].DimensionTargetMm!.Value, 24.75);
     s.Undo(); Assert(s.Document.Elements.Length == 0); s.Redo(); Near(s.Document.Elements[0].LengthMm, 24.75);
 });
@@ -706,7 +713,7 @@ Check("Version 1 documents are loaded and upgraded without losing free dimension
     using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
     using (var writer = new StreamWriter(zip.CreateEntry("project.json").Open()))
         writer.Write(System.Text.Json.JsonSerializer.Serialize(new DrawingDocument { SchemaVersion = 1, Elements = [Line()] }));
-    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == 12); Near(read.Elements[0].LengthMm, 10);
+    var read = ProjectFile.Open(path); Assert(read.SchemaVersion == DocumentFormat.Current); Near(read.Elements[0].LengthMm, 10);
 });
 
 var interactive = new EditorSession();
@@ -927,7 +934,7 @@ Check("Pointer tool creates a three-point arc and stores it in project format", 
     var arc = interactive.Document.Elements.Single();
     Assert(arc.Kind == ElementKind.Arc); Near(arc.LengthMm, 20); Near(Math.Abs(arc.ArcSweepDegrees), 180);
     var path = Path.Combine(output, "arc-polyline.ecad"); ProjectFile.Save(path, interactive.Document);
-    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == 12 && reopened.Elements.Single().Kind == ElementKind.Arc);
+    var reopened = ProjectFile.Open(path); Assert(reopened.SchemaVersion == DocumentFormat.Current && reopened.Elements.Single().Kind == ElementKind.Arc);
     using var frame = liveWindow.CaptureRenderedFrame() ?? throw new Exception("No arc render");
     frame.Save(Path.Combine(output, "arc-tool.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
 });
@@ -1071,6 +1078,29 @@ Check("Property panel edits geometry, name and path type as one undoable action"
     interactive.Undo(); Assert(interactive.Document.Elements.Single() == source);
     propertyWindow.Close();
 });
+Check("Inspector converts a wire to graphics without changing its former net and supports undo", () =>
+{
+    interactive.Load(new() { Elements = [Wire(new(10, 20), new(30, 20))] });
+    var source = interactive.Document.Elements.Single();
+    var net = interactive.Document.Nets.Single();
+    interactive.Select(source, false);
+    var errors = new List<string>();
+    var properties = new PropertyPanel(interactive, errors.Add);
+    var propertyWindow = new Window { Width = 320, Height = 900, Content = properties };
+    propertyWindow.Show(); Dispatcher.UIThread.RunJobs();
+    properties.GetVisualDescendants().OfType<ComboBox>().Single(x => x.Name == "PropertyPathKind").SelectedIndex = 1;
+    // Net fields no longer apply when changing this wire into graphics.
+    properties.GetVisualDescendants().OfType<TextBox>().Single(x => x.Name == "PropertyNetNumber").Text = "";
+    properties.GetVisualDescendants().OfType<Button>().Single(x => x.Name == "ApplyProperties")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    var result = interactive.Document.Elements.Single();
+    Assert(result.Kind == ElementKind.Line && result.NetId is null && result.Points is null);
+    Assert(result.Id == source.Id && result.A == source.A && result.B == source.B);
+    Assert(interactive.Document.Nets.Single() == net);
+    interactive.Undo(); Assert(interactive.Document.Elements.Single() == source);
+    interactive.Redo(); Assert(interactive.Document.Elements.Single().Kind == ElementKind.Line);
+    propertyWindow.Close();
+});
 Check("Property panel turns an associative dimension into a driving constraint", () =>
 {
     var source = Line();
@@ -1174,13 +1204,33 @@ Check("Library editor creates every hierarchy level and searches variants", () =
     dialog.Close();
 });
 liveWindow.Close();
+Check("Assignment tab edits a core, preserves tab and refreshes on undo", () =>
+{
+    var session = new EditorSession();
+    var net = new ProjectNet(Guid.NewGuid(), "24V");
+    var core = new CableCore(Guid.NewGuid(), "1", CableCoreStatus.Spare);
+    session.Load(new() { Nets = [net], Cables = [new(Guid.NewGuid(), "W1", null, 1, null, null, null, null, [core])] });
+    var window = new ElectricalProjectWindow(session); window.Show(); Dispatcher.UIThread.RunJobs();
+    var tabs = window.GetVisualDescendants().OfType<TabControl>().Single(); tabs.SelectedIndex = 4;
+    Dispatcher.UIThread.RunJobs();
+    ComboBox NetBox() => window.GetVisualDescendants().OfType<ComboBox>().Single(c => c.Name == "AssignmentNet");
+    void ApplyAssignment() => window.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "ApplyNetAssignment")
+        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+    NetBox().SelectedIndex = 1; ApplyAssignment(); Dispatcher.UIThread.RunJobs();
+    Assert(session.Document.Cables[0].Cores[0].NetId == net.Id && tabs.SelectedIndex == 4);
+    session.Undo(); Dispatcher.UIThread.RunJobs(); Assert(NetBox().SelectedIndex == 0);
+    session.Redo(); Dispatcher.UIThread.RunJobs();
+    NetBox().SelectedIndex = 0; ApplyAssignment(); Dispatcher.UIThread.RunJobs();
+    Assert(session.Document.Cables[0].Cores[0].NetId is null && session.Document.Cables[0].Cores[0].Status == CableCoreStatus.Spare);
+    window.Close();
+});
 Check("Electrical project navigator renders devices, nets, terminals and cables", () =>
 {
     var projectSession = new EditorSession(); projectSession.Load(ExampleElectricalProject.Create());
     var window = new ElectricalProjectWindow(projectSession); window.Show(); Dispatcher.UIThread.RunJobs();
     var text = string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(item => item.Text));
     Assert(text.Contains("Пристроїв:") && text.Contains("Кіл:") && text.Contains("Клемників:") && text.Contains("Кабелів:"));
-    Assert(window.GetVisualDescendants().OfType<TabItem>().Count() == 4);
+    Assert(window.GetVisualDescendants().OfType<TabItem>().Count() == 5);
     using (var frame = window.CaptureRenderedFrame() ?? throw new Exception("No rendered electrical navigator"))
         frame.Save(Path.Combine(output, "electrical-project.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
     window.Close();
@@ -1207,9 +1257,24 @@ Check("Main window refreshes and selects a newly created custom symbol", () =>
     typeof(MainWindow).GetField("allowClose", flags)?.SetValue(main, true);
     main.Close();
 });
+Check("Main window dirty marker follows saved content across navigation and undo", () =>
+{
+    var window = new MainWindow(); window.Show();
+    var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+    var session = (EditorSession)typeof(MainWindow).GetField("session", flags)!.GetValue(window)!;
+    var first = session.Document.ActivePageId; session.AddPage("Second");
+    typeof(MainWindow).GetField("savedRevision", flags)!.SetValue(window, session.ContentRevision);
+    session.SwitchPage(first); Dispatcher.UIThread.RunJobs(); Assert(!window.Title!.StartsWith("*"));
+    session.Add(Line()); Dispatcher.UIThread.RunJobs(); Assert(window.Title!.StartsWith("*"));
+    session.Undo(); Dispatcher.UIThread.RunJobs(); Assert(!window.Title!.StartsWith("*"));
+    typeof(MainWindow).GetField("allowClose", flags)!.SetValue(window, true); window.Close();
+});
 Check("Main window renders with Ukrainian controls", () =>
 {
     var main = new MainWindow(); main.Show();
+    Assert(main.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "ApplicationVersion").Text!.Contains($"ECAD {AppInfo.Version}"));
+    Assert(AppInfo.Version == typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion.Split('+')[0]);
     var labels = main.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text).ToHashSet();
     Assert(labels.Contains("Файл") && labels.Contains("Аркуші") && labels.Contains("Редагування") && labels.Contains("Інструменти") && labels.Contains("Параметри побудови"));
     Assert(main.GetVisualDescendants().OfType<Button>().Count(button => ToolTip.GetTip(button) is string) >= 15);

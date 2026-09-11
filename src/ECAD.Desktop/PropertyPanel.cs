@@ -284,7 +284,7 @@ public sealed class PropertyPanel : Border
             {
                 var a = Position(); var length = Positive(fields, "Length");
                 updated = updated with { A = a, B = Geometry.Polar(a, length, Number(fields, "Angle")) };
-                if (pathKind?.SelectedIndex == 0) updated = updated with { Kind = ElementKind.Wire, Points = [updated.A, updated.B] };
+                if (pathKind?.SelectedIndex == 0) updated = PathEditing.Convert(updated, ElementKind.Wire);
                 break;
             }
             case ElementKind.Wire:
@@ -294,7 +294,7 @@ public sealed class PropertyPanel : Border
                 {
                     var b = Geometry.Polar(a, Positive(fields, "Length"), Number(fields, "Angle"));
                     updated = updated with { A = a, B = b, Points = [a, b] };
-                    if (pathKind?.SelectedIndex == 1) updated = updated with { Kind = ElementKind.Line, Points = null };
+                    if (pathKind?.SelectedIndex == 1) updated = PathEditing.Convert(updated, ElementKind.Line);
                 }
                 else updated = updated.Move(a - source.A);
                 break;
@@ -378,7 +378,7 @@ public sealed class PropertyPanel : Border
             return e;
         }).ToArray();
         if (source.Kind == ElementKind.Symbol) session.ApplyElementsAndDevice(elements, updated);
-        else if (electricalNet is null) session.Apply(elements);
+        else if (electricalNet is null || updated.Kind != ElementKind.Wire) session.Apply(elements);
         else
         {
             var number = fields["NetNumber"].Text?.Trim();

@@ -42,22 +42,10 @@ public static class DrawingPages
             return document with { ActivePageId = page.Id, Pages = [page] };
         }
 
-        var activeId = document.Pages.Any(page => page.Id == document.ActivePageId)
-            ? document.ActivePageId : document.Pages[0].Id;
-        var pages = document.Pages.Select(page => page.Id == activeId
-            ? page with
-            {
-                WidthMm = document.WidthMm, HeightMm = document.HeightMm,
-                Format = DetectFormat(document.WidthMm, document.HeightMm, page.Format),
-                Elements = document.Elements ?? []
-            }
-            : page).ToArray();
-        var active = pages.Single(page => page.Id == activeId);
-        return document with
-        {
-            ActivePageId = activeId, Pages = pages,
-            WidthMm = active.WidthMm, HeightMm = active.HeightMm, Elements = active.Elements
-        };
+        if (!document.Pages.Any(page => page.Id == document.ActivePageId))
+            throw new InvalidDataException("Не знайдено активний аркуш.");
+        return document with { Pages = document.Pages.Select(page => page with
+        { Format = DetectFormat(page.WidthMm, page.HeightMm, page.Format) }).ToArray() };
     }
 
     public static (double Width, double Height) Size(PaperFormat format) => format switch

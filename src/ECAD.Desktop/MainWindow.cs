@@ -23,26 +23,26 @@ public sealed class MainWindow : Window
     private bool pageRefreshPending;
     private bool refreshingPages;
     private (Guid PageId, Guid ElementId)? pendingPageLink;
-    private DrawingDocument saved;
+    private Guid savedRevision;
     private string? currentPath;
     private bool allowClose;
     private bool askingClose;
-    private bool IsDirty => !ReferenceEquals(saved, session.Document);
+    private bool IsDirty => savedRevision != session.ContentRevision;
 
     public MainWindow()
     {
-        saved = session.Document;
+        savedRevision = session.ContentRevision;
         Title = "ECAD — прототип"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600;
         canvas = new DrawingCanvas(session);
         var root = new DockPanel();
         var header = new StackPanel { Background = Brushes.White };
         DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Text = "ECAD 0.17  /  Електрична модель проєкту", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
+        var title = new TextBlock { Name = "ApplicationVersion", Text = $"ECAD {AppInfo.Version}  /  Електрична модель проєкту", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
         header.Children.Add(title);
         var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
         header.Children.Add(commands);
         var files = AddToolbarGroup(commands, "Файл");
-        AddAsyncIconButton(files, "+", "Новий аркуш", async () => { if (await CanDiscard()) { canvas.Cancel(); session.Load(new()); saved = session.Document; currentPath = null; UpdateTitle(); } });
+        AddAsyncIconButton(files, "+", "Новий аркуш", async () => { if (await CanDiscard()) { canvas.Cancel(); session.Load(new()); savedRevision = session.ContentRevision; currentPath = null; UpdateTitle(); } });
         AddAsyncIconButton(files, "↗", "Відкрити…", Open);
         AddAsyncIconButton(files, "↓", "Зберегти…", Save);
         AddAsyncIconButton(files, "▤", "Бібліотеки пристроїв", ShowLibraryEditor);
@@ -54,7 +54,7 @@ public sealed class MainWindow : Window
         pagePicker.SelectionChanged += (_, _) =>
         {
             if (refreshingPages || pagePicker.SelectedItem is not DrawingPage page || page.Id == session.Document.ActivePageId) return;
-            var wasSaved = !IsDirty; canvas.Cancel(); session.SwitchPage(page.Id); if (wasSaved) saved = session.Document; canvas.Fit();
+            canvas.Cancel(); session.SwitchPage(page.Id); canvas.Fit();
             status.Text = $"Відкрито аркуш {page.Number}: {page.Name}.";
         };
         pages.Children.Add(pagePicker);
@@ -551,7 +551,7 @@ public sealed class MainWindow : Window
             if (file is null) return;
             var path = file.TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
             ProjectFile.Save(path, session.Document);
-            currentPath = path; saved = session.Document; UpdateTitle(); status.Text = "Документ збережено.";
+            currentPath = path; savedRevision = session.ContentRevision; UpdateTitle(); status.Text = "Документ збережено.";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         { ReportError(ex, "Не вдалося зберегти"); }
@@ -571,7 +571,7 @@ public sealed class MainWindow : Window
             if (files.Count == 0) return;
             var path = files[0].TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
             var document = ProjectFile.Open(path);
-            session.Load(document); currentPath = path; saved = session.Document;
+            session.Load(document); currentPath = path; savedRevision = session.ContentRevision;
             canvas.Fit(); UpdateTitle(); status.Text = "Документ відкрито.";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)

@@ -1,0 +1,41 @@
+using ECAD.Core;
+
+Guid Id(int n) => Guid.Parse($"00000000-0000-0000-0000-{n:000000000000}");
+var line = new DrawingElement(Id(1), ElementKind.Line, new(10, 10), new(30, 10));
+#if GE7
+line = line with { Name = "Контрольна лінія" };
+#endif
+var symbol = new DrawingElement(Id(3), ElementKind.Symbol, new(50, 50), new(50, 50))
+    { SymbolKey = "IEC_COIL", DeviceTag = "K1" };
+var label = new DrawingElement(Id(4), ElementKind.Text, new(45, 40), new(45, 40))
+    { Text = "K1", TextHeightMm = 3.5, LinkedElementId = symbol.Id };
+var wire = new DrawingElement(Id(2), ElementKind.Wire, new(30, 50), new(42.5, 50))
+    { Points = [new(30, 50), new(42.5, 50)] };
+var dimension = new DrawingElement(Id(5), ElementKind.Dimension, line.A, line.B)
+    { StartReference = new(line.Id, ReferenceKind.Vertex, 0), EndReference = new(line.Id, ReferenceKind.Vertex, 1) };
+#if GE8
+dimension = dimension with { DimensionMode = DimensionMode.Driving, DimensionTargetMm = 20 };
+#endif
+var elements = new List<DrawingElement> { line, wire, symbol, label, dimension };
+#if GE9
+elements.Add(new(Id(6), ElementKind.Arc, new(70, 50), new(80, 50)) { ArcSweepDegrees = 90 });
+elements.Add(new(Id(7), ElementKind.Polyline, new(10, 70), new(30, 80)) { Points = [new(10,70), new(20,70), new(30,80)] });
+#endif
+var document = new DrawingDocument { Elements = elements.ToArray() };
+#if GE10
+var physical = new PhysicalRepresentation(Id(15), "DIN", 18, 80, 65, "DIN rail");
+var variant = new DeviceVariant(Id(14), "24V", "DEMO-K1", "24 V DC", "IEC_COIL", [], [], [], [physical]);
+var family = new DeviceFamily(Id(13), "Реле", "DEMO", "Test", [], [variant]);
+var type = new DeviceTypeDefinition(Id(12), "Контактор", null, [], [family]);
+document = document with { ComponentLibraries = [new(Id(11), "Історичний приклад", null, 1, [type])],
+    Elements = document.Elements.Select(e => e.Id == symbol.Id ? e with { ComponentVariantId = variant.Id, PhysicalRepresentationId = physical.Id } : e).ToArray() };
+#endif
+#if GE11
+var page1 = new DrawingPage { Id = Id(21), Name = "Силова схема", Elements = document.Elements };
+var target = new DrawingElement(Id(8), ElementKind.Text, new(20, 20), new(20, 20)) { Text = "Керування" };
+var page2 = new DrawingPage { Id = Id(22), Number = 2, Name = "Керування", Elements = [target],
+    Format = PaperFormat.A4Portrait, WidthMm = 210, HeightMm = 297 };
+document = document with { Pages = [page1, page2], ActivePageId = page1.Id,
+    CrossPageReferences = [new(Id(23), page1.Id, symbol.Id, page2.Id, target.Id)] };
+#endif
+ProjectFile.Save(args[0], document);

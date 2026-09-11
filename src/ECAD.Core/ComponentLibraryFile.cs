@@ -13,12 +13,14 @@ public static class ComponentLibraryFile
 
     public static void Save(string path, ComponentLibrary library)
     {
+        var content = JsonSerializer.SerializeToUtf8Bytes(new Envelope(1, library), Options);
+        if (content.Length > 32 * 1024 * 1024) throw new InvalidDataException("Файл бібліотеки надто великий для збереження.");
         path = Path.GetFullPath(path);
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-            File.WriteAllText(temp, JsonSerializer.Serialize(new Envelope(1, library), Options));
+            File.WriteAllBytes(temp, content);
             File.Move(temp, path, true);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
@@ -26,8 +28,9 @@ public static class ComponentLibraryFile
 
     public static ComponentLibrary Open(string path, IEnumerable<string> symbolKeys)
     {
-        var envelope = JsonSerializer.Deserialize<Envelope>(File.ReadAllText(Path.GetFullPath(path)), Options)
-            ?? throw new InvalidDataException("Порожній файл бібліотеки.");
+        using var stream = File.OpenRead(Path.GetFullPath(path));
+        if (stream.Length > 32 * 1024 * 1024) throw new InvalidDataException("Файл бібліотеки надто великий.");
+        var envelope = FileJson.Read<Envelope>(stream, Options);
         if (envelope.SchemaVersion != 1 || envelope.Library is null)
             throw new InvalidDataException("Непідтримуваний формат бібліотеки.");
         ComponentCatalog.Validate([envelope.Library], symbolKeys.ToHashSet(StringComparer.Ordinal));

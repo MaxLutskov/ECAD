@@ -1,8 +1,13 @@
-﻿param([string]$Version = '0.17')
+param([string]$Version)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$outputRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot "output/v$Version"))
+[xml]$buildProperties = Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw
+$applicationVersion = [string]$buildProperties.Project.PropertyGroup.Version
+if ($Version -and $Version -ne $applicationVersion) { throw 'Версія пакета має відповідати Directory.Build.props.' }
+$Version = $applicationVersion
+. (Join-Path $projectRoot 'scripts/PackagePaths.ps1')
+$outputRoot = New-EcadPackageRoot -ProjectRoot $projectRoot -Version $Version
 $allowedOutputRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'output')) + [IO.Path]::DirectorySeparatorChar
 if (-not ($outputRoot + [IO.Path]::DirectorySeparatorChar).StartsWith($allowedOutputRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Некоректний шлях пакета.'
@@ -18,7 +23,7 @@ foreach ($package in $packages) {
     if (-not ($packageRoot + [IO.Path]::DirectorySeparatorChar).StartsWith($outputRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Некоректний шлях платформи.'
     }
-    if (Test-Path -LiteralPath $packageRoot) { Remove-Item -LiteralPath $packageRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $packageRoot -ErrorAction Stop | Out-Null
     $appDirectory = New-Item -ItemType Directory -Path (Join-Path $packageRoot 'App') -Force
     $libraryDirectory = New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Libraries') -Force
     $projectDirectory = New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Projects') -Force
@@ -36,7 +41,7 @@ foreach ($package in $packages) {
 "@)
     [IO.File]::WriteAllText((Join-Path $projectDirectory.FullName 'README.txt'), @"
 ECAD автоматично відкриває цю папку для збереження та завантаження креслень (*.ecad).
-complete-electrical-demo.ecad — готовий приклад багатосторінкової електричної моделі.
+complete-electrical-demo.ecad — навчальний приклад моделі з відомими повідомленнями ERC.
 Власні підпапки проєктів можна створювати тут.
 "@)
     [IO.File]::WriteAllText((Join-Path $packageRoot 'README.txt'), @"

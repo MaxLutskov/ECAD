@@ -10,11 +10,16 @@ public sealed class ElectricalProjectWindow : Window
 {
     private readonly EditorSession session;
     private readonly TabControl tabs = new();
+    private readonly NetAssignmentsPanel assignments;
+    private readonly TabItem assignmentsTab;
     private readonly TextBlock summary = new() { Margin = new Thickness(4), Foreground = Brushes.DimGray };
 
     public ElectricalProjectWindow(EditorSession session)
     {
         this.session = session;
+        assignments = new NetAssignmentsPanel(session);
+        assignmentsTab = new TabItem { Header = "Призначення", Content = new ScrollViewer { Content = assignments } };
+        Closed += (_, _) => assignments.Dispose();
         Title = "Електрична модель проєкту"; Width = 850; Height = 620; MinWidth = 650; MinHeight = 450;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var root = new DockPanel { Margin = new Thickness(14) };
@@ -22,7 +27,8 @@ public sealed class ElectricalProjectWindow : Window
         top.Children.Add(new TextBlock { Text = "Електрична модель", FontSize = 21, FontWeight = FontWeight.SemiBold });
         top.Children.Add(summary);
         var actions = new WrapPanel();
-        Add(actions, "Автонумерація кіл", () => { session.RenumberNets(); Refresh(); });
+        Add(actions, "Автонумерація кіл", () => RunCommand(() => session.RenumberNets()));
+        Add(actions, "Очистити невикористані кола", () => RunCommand(session.RemoveUnusedNets));
         Add(actions, "+ Клемник", AddTerminalStrip);
         Add(actions, "+ Кабель", AddCable);
         Add(actions, "Закрити", Close);
@@ -33,6 +39,7 @@ public sealed class ElectricalProjectWindow : Window
 
     private void Refresh()
     {
+        var selectedTab = tabs.SelectedIndex;
         var doc = session.Document;
         summary.Text = $"Пристроїв: {doc.Devices.Length} · Кіл: {doc.Nets.Length} · Клемників: {doc.TerminalStrips.Length} · Кабелів: {doc.Cables.Length}";
         tabs.ItemsSource = new[]
@@ -44,8 +51,10 @@ public sealed class ElectricalProjectWindow : Window
             Tab("Клемники", doc.TerminalStrips.OrderBy(item => item.Tag).Select(strip =>
                 $"{strip.Tag}  ·  {strip.Description ?? "без опису"}  ·  клем: {strip.Terminals.Length}")),
             Tab("Кабелі", doc.Cables.OrderBy(item => item.Tag).Select(cable =>
-                $"{cable.Tag}  ·  {cable.Type ?? "тип не задано"}  ·  {cable.CoreCount} жил  ·  {cable.From ?? "—"} → {cable.To ?? "—"}"))
+                $"{cable.Tag}  ·  {cable.Type ?? "тип не задано"}  ·  {cable.CoreCount} жил  ·  {cable.From ?? "—"} → {cable.To ?? "—"}")),
+            assignmentsTab
         };
+        tabs.SelectedIndex = Math.Max(0, selectedTab);
     }
 
     private static TabItem Tab(string header, IEnumerable<string> rows) => new()
@@ -89,6 +98,12 @@ public sealed class ElectricalProjectWindow : Window
         var dialog = new Window { Title = "Помилка", Width = 420, Height = 160, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var panel = new StackPanel { Margin = new Thickness(18), Spacing = 12, Children = { new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap } } };
         Add(panel, "Закрити", dialog.Close); dialog.Content = panel; await dialog.ShowDialog(this);
+    }
+
+    private async void RunCommand(Action command)
+    {
+        try { command(); }
+        catch (InvalidDataException ex) { await ShowMessage(ex.Message); }
     }
 
     private static void Add(Panel panel, string text, Action action)
