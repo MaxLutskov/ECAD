@@ -18,9 +18,9 @@
 
 `WorkspaceCommands` — реєстр команд/ICommand; `WorkspacePanels` — реєстр панелей і layout. `CanvasRenderer` читає документ/selection/viewport, не володіє інструментами або session. DrawingCanvas керує взаємодією та preview. EditorSession має окремі події content/selection/active page; інспектор пропускає повторні події без змін. Спільне редагування винесено у Core/Application/SelectionProperties. Назви основних команд містяться у resx, semantic resources визначають кольори оболонки.
 
-Перевірка: `./scripts/Verify.ps1`. Набір містить 133 сценарії, з них нові перевіряють команди/CanExecute, текстовий фокус, вкладки, бібліотечну ідентичність, multi-selection/Undo, layout/пошкоджені settings, ERC-навігацію, палітру команд, скасування файлів та headless масштабування 100/150/200% при ширині 900 DIP. Результати зображень — `tmp/checks/workspace-*.png`. Остаточний результат CI фіксується після запуску.
+Перевірка: `./scripts/Verify.ps1`. Набір містить 133 сценарії, з них нові перевіряють команди/CanExecute, текстовий фокус, вкладки, бібліотечну ідентичність, multi-selection/Undo, layout/пошкоджені settings, ERC-навігацію, палітру команд, скасування файлів та headless масштабування 100/150/200% при ширині 900 DIP. Результати зображень — `tmp/checks/workspace-*.png`. Локальний Release пройшов з 0 warnings/errors. [GitHub Actions 35060315223](https://github.com/MaxLutskov/ECAD/actions/runs/35060315223) для коміту `d2ff8ce` успішний на Windows (2 хв 42 с) та Ubuntu 24.04 (42 с): по 133 checks і перевірка пакування. Обидва CI-прогони використовують stable .NET 10.
 
-Пакети: `output/v0.19/win-x64` та `output/v0.19/linux-x64`; потрібен .NET 10 Runtime. Приклади знаходяться в Projects/Libraries; старі папки пакетів не видаляються.
+Пакети: `output/v0.19/win-x64` та `output/v0.19/linux-x64`; потрібен .NET 10 Runtime. Приклади знаходяться в Projects/Libraries; старі папки пакетів не видаляються. Версія Windows binary — `0.19.0.0`, ProductVersion — `0.19+d2ff8ceb32a4735897aa9d2672902b6d58638ad7`.
 
 ## Межі та ручне приймання
 
