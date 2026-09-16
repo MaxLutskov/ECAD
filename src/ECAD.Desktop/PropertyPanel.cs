@@ -3,15 +3,21 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 using ECAD.Core;
 using Geometry = ECAD.Core.Geometry;
 
 namespace ECAD.Desktop;
 
-public sealed class PropertyPanel : Border
+public sealed class PropertyPanel : Border, IDisposable
 {
     private readonly EditorSession session;
     private readonly Action<string> report;
+    private Guid renderedRevision;
+    private Guid renderedPage;
+    private Guid[] renderedSelection = [];
+    public void Dispose() { session.ContentChanged -= Refresh; session.SelectionChanged -= Refresh; session.ActivePageChanged -= Refresh; }
 
     public PropertyPanel(EditorSession session, Action<string> report)
     {
@@ -19,14 +25,30 @@ public sealed class PropertyPanel : Border
         this.report = report;
         Width = 300;
         Padding = new Thickness(14, 12);
-        Background = new SolidColorBrush(Color.Parse("#f8fafc"));
+        Background = Brushes.Transparent;
         BorderBrush = new SolidColorBrush(Color.Parse("#cbd5e1"));
         BorderThickness = new Thickness(1, 0, 0, 0);
-        session.Changed += Refresh;
+        session.ContentChanged += Refresh; session.SelectionChanged += Refresh; session.ActivePageChanged += Refresh;
         Refresh();
     }
 
     private void Refresh()
+    {
+        var ids = session.Selection.Order().ToArray();
+        if (Child is not null && renderedRevision == session.ContentRevision && renderedPage == session.Document.ActivePageId && renderedSelection.SequenceEqual(ids)) return;
+        var sameSelection = renderedSelection.SequenceEqual(ids);
+        var focus = this.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(box => box.IsFocused);
+        var focusName = sameSelection ? focus?.Name : null;
+        var caret = focus?.CaretIndex ?? 0;
+        renderedRevision = session.ContentRevision; renderedPage = session.Document.ActivePageId; renderedSelection = ids;
+        Rebuild();
+        if (focusName is not null)
+        {
+            var next = this.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(box => box.Name == focusName);
+            if (next is not null) { next.Focus(); next.CaretIndex = Math.Min(caret, next.Text?.Length ?? 0); }
+        }
+    }
+    private void Rebuild()
     {
         var panel = new StackPanel { Spacing = 9 };
         panel.Children.Add(new TextBlock { Text = "Властивості", FontSize = 18, FontWeight = FontWeight.SemiBold });
@@ -39,9 +61,10 @@ public sealed class PropertyPanel : Border
         }
         if (selected.Length != 1)
         {
-            panel.Children.Add(Info($"Вибрано об’єктів: {selected.Length}. Для редагування властивостей вибери один об’єкт."));
+            panel.Children.Add(Info($"Вибрано об’єктів: {selected.Length}. Спільні зміни застосовуються однією дією."));
             var groups = selected.Select(e => e.GroupId).Where(id => id is not null).Distinct().Count();
             if (groups > 0) panel.Children.Add(Info($"Груп у виділенні: {groups}."));
+            BuildMultipleEditor(panel, selected);
             Child = new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
             return;
         }
@@ -50,13 +73,44 @@ public sealed class PropertyPanel : Border
         Child = new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
     }
 
+    private void BuildMultipleEditor(StackPanel panel, DrawingElement[] selected)
+    {
+        var sameName = selected.All(e => e.Name == selected[0].Name);
+        var name = new TextBox { Name = "MultipleName", Text = sameName ? selected[0].Name : "", PlaceholderText = sameName ? "Назва" : "Різні значення" };
+        var rename = new CheckBox { Content = "Змінити назву", Name = "MultipleRename" };
+        name.TextChanged += (_, _) => { if (name.Text != (sameName ? selected[0].Name : "")) rename.IsChecked = true; };
+        panel.Children.Add(rename); panel.Children.Add(name);
+        TextBox Number(string title, string id, string? text)
+        {
+            panel.Children.Add(new TextBlock { Text = title });
+            var input = new TextBox { Name = id, Text = text, PlaceholderText = "Різні значення / без зміни" }; panel.Children.Add(input); return input;
+        }
+        var x = Number("Зміщення X, мм", "MultipleX", "0"); var y = Number("Зміщення Y, мм", "MultipleY", "0");
+        TextBox? height = null;
+        if (selected.All(e => e.Kind == ElementKind.Text)) height = Number("Висота тексту, мм", "MultipleHeight", selected.All(e => e.TextHeightMm == selected[0].TextHeightMm) ? Format(selected[0].TextHeightMm) : "");
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Firebrick };
+        var apply = new Button { Name = "ApplyMultipleProperties", Content = "Застосувати до вибраних", HorizontalAlignment = HorizontalAlignment.Stretch };
+        apply.Click += (_, _) =>
+        {
+            try
+            {
+                double Parse(TextBox box) => double.Parse((box.Text ?? "0").Replace(',', '.'), CultureInfo.InvariantCulture);
+                session.ApplyDocument(SelectionProperties.Apply(session.Document, selected.Select(e => e.Id).ToHashSet(), rename.IsChecked == true,
+                    name.Text?.Trim(), new(Parse(x), Parse(y)), string.IsNullOrWhiteSpace(height?.Text) ? null : Parse(height!)));
+                report("Спільні властивості оновлено.");
+            }
+            catch (Exception ex) when (ex is InvalidDataException or FormatException or OverflowException) { error.Text = ex.Message; }
+        };
+        panel.Children.Add(error); panel.Children.Add(apply);
+    }
+
     private void BuildEditor(StackPanel panel, DrawingElement element)
     {
-        panel.Children.Add(new TextBlock { Text = KindName(element.Kind), Foreground = Brushes.DimGray });
+        panel.Children.Add(new TextBlock { Text = KindName(element.Kind) });
         var fields = new Dictionary<string, TextBox>();
         TextBox Field(string key, string label, object? value, bool readOnly = false)
         {
-            panel.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = Brushes.DimGray });
+            panel.Children.Add(new TextBlock { Text = label, FontSize = 12 });
             var box = new TextBox
             {
                 Name = "Property" + key,
@@ -83,7 +137,7 @@ public sealed class PropertyPanel : Border
                 SelectedIndex = element.Kind == ElementKind.Wire ? 0 : 1,
                 IsEnabled = element.Kind != ElementKind.Wire || element.Points?.Length == 2
             };
-            panel.Children.Add(new TextBlock { Text = "Тип", FontSize = 12, Foreground = Brushes.DimGray });
+            panel.Children.Add(new TextBlock { Text = "Тип", FontSize = 12 });
             panel.Children.Add(pathKind);
             if (!pathKind.IsEnabled) panel.Children.Add(Info("Багатосегментний провідник не можна перетворити на одну пряму без втрати геометрії."));
         }
@@ -161,14 +215,14 @@ public sealed class PropertyPanel : Border
                         $"Тип: {deviceFunction?.Kind.ToString() ?? "—"}\nКонтакти: {(deviceFunction is null ? "—" : string.Join(", ", deviceFunction.Terminals))}"));
                 if (element.SymbolKey == "IEC_TERMINAL" && session.Document.TerminalStrips.Length > 0)
                 {
-                    panel.Children.Add(new TextBlock { Text = "Клема проєкту", FontSize = 12, Foreground = Brushes.DimGray });
+                    panel.Children.Add(new TextBlock { Text = "Клема проєкту", FontSize = 12 });
                     var terminalChoices = session.Document.TerminalStrips.SelectMany(strip => strip.Terminals.Select(item =>
                         new TerminalChoice(item.Id, $"{strip.Tag}:{item.Number}"))).ToArray();
                     terminal = new ComboBox { Name = "PropertyTerminal", ItemsSource = terminalChoices };
                     terminal.SelectedItem = terminalChoices.FirstOrDefault(item => item.Id == element.TerminalId);
                     panel.Children.Add(terminal);
                 }
-                panel.Children.Add(new TextBlock { Text = "Варіант пристрою", FontSize = 12, Foreground = Brushes.DimGray });
+                panel.Children.Add(new TextBlock { Text = "Варіант пристрою", FontSize = 12 });
                 var variantChoices = new[] { new VariantChoice(null, "Без моделі пристрою", null) }
                     .Concat(ComponentCatalog.Variants(session.Document).Where(item => item.Variant.SymbolKey == element.SymbolKey)
                         .Select(item => new VariantChoice(item.Variant.Id,
@@ -177,7 +231,7 @@ public sealed class PropertyPanel : Border
                 componentVariant = new ComboBox { Name = "PropertyComponentVariant", ItemsSource = variantChoices };
                 componentVariant.SelectedItem = variantChoices.FirstOrDefault(item => item.Id == element.ComponentVariantId) ?? variantChoices[0];
                 panel.Children.Add(componentVariant);
-                panel.Children.Add(new TextBlock { Text = "Фізичне виконання", FontSize = 12, Foreground = Brushes.DimGray });
+                panel.Children.Add(new TextBlock { Text = "Фізичне виконання", FontSize = 12 });
                 physicalRepresentation = new ComboBox { Name = "PropertyPhysicalRepresentation" };
                 panel.Children.Add(physicalRepresentation);
                 void UpdatePhysicalChoices()
@@ -219,7 +273,7 @@ public sealed class PropertyPanel : Border
                 Field("X", "X, мм", element.A.X); Field("Y", "Y, мм", element.A.Y);
                 break;
             case ElementKind.Dimension:
-                panel.Children.Add(new TextBlock { Text = "Тип розміру", FontSize = 12, Foreground = Brushes.DimGray });
+                panel.Children.Add(new TextBlock { Text = "Тип розміру", FontSize = 12 });
                 dimensionType = new ComboBox
                 {
                     Name = "PropertyDimensionType",
@@ -227,7 +281,7 @@ public sealed class PropertyPanel : Border
                     SelectedIndex = (int)element.DimensionType
                 };
                 panel.Children.Add(dimensionType);
-                panel.Children.Add(new TextBlock { Text = "Режим", FontSize = 12, Foreground = Brushes.DimGray });
+                panel.Children.Add(new TextBlock { Text = "Режим", FontSize = 12 });
                 dimensionMode = new ComboBox
                 {
                     Name = "PropertyDimensionMode", ItemsSource = new[] { "Довідковий", "Керувальний" },
@@ -435,11 +489,11 @@ public sealed class PropertyPanel : Border
             throw new InvalidDataException("Полілінія повинна мати щонайменше дві різні послідовні вершини.");
         return points;
     }
-    private static TextBlock Info(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray };
+    private static TextBlock Info(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap };
     private static Border SectionNote(string title, string text) => new()
     {
         Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(10), CornerRadius = new CornerRadius(5),
-        Background = new SolidColorBrush(Color.Parse("#e8eef7")),
+        Background = Brushes.Transparent,
         Child = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = title, FontWeight = FontWeight.SemiBold }, Info(text) } }
     };
 

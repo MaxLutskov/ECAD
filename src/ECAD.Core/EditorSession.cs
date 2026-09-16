@@ -17,6 +17,25 @@ public sealed class EditorSession
     public bool CanPaste => clipboard.Length > 0;
     public DrawingPage ActivePage => Document.Pages.Single(page => page.Id == Document.ActivePageId);
     public event Action? Changed;
+    public event Action? ContentChanged;
+    public event Action? SelectionChanged;
+    public event Action? ActivePageChanged;
+    private Guid notifiedRevision;
+    private Guid notifiedPage;
+    private Guid[] notifiedSelection = [];
+    public EditorSession() { notifiedRevision = ContentRevision; notifiedPage = Document.ActivePageId; }
+    private void RaiseChanged()
+    {
+        var content = notifiedRevision != ContentRevision;
+        var page = notifiedPage != Document.ActivePageId;
+        var selected = Selection.Order().ToArray();
+        var selection = !notifiedSelection.SequenceEqual(selected);
+        notifiedRevision = ContentRevision; notifiedPage = Document.ActivePageId; notifiedSelection = selected;
+        if (content) ContentChanged?.Invoke();
+        if (page) ActivePageChanged?.Invoke();
+        if (selection) SelectionChanged?.Invoke();
+        Changed?.Invoke();
+    }
 
     public void Load(DrawingDocument document)
     {
@@ -26,7 +45,7 @@ public sealed class EditorSession
         Document = document;
         ContentRevision = Guid.NewGuid();
         currentSnapshot = new(Document, ContentRevision);
-        undo.Clear(); redo.Clear(); Selection.Clear(); Changed?.Invoke();
+        undo.Clear(); redo.Clear(); Selection.Clear(); RaiseChanged();
     }
 
     public void Apply(DrawingElement[] elements)
@@ -79,7 +98,7 @@ public sealed class EditorSession
         {
             ActivePageId = page.Id, WidthMm = page.WidthMm, HeightMm = page.HeightMm, Elements = page.Elements
         };
-        Selection.Clear(); Changed?.Invoke();
+        Selection.Clear(); RaiseChanged();
     }
 
     public void UpdatePage(Guid pageId, string name, PaperFormat format, bool showFrame,
@@ -391,17 +410,7 @@ public sealed class EditorSession
     public void Add(DrawingElement element) => Apply([.. Document.Elements, element]);
     public void Delete() => ApplyDocument(ProjectMaintenance.DeleteElements(Document, Selection));
     public void RemoveUnusedNets() => ApplyDocument(ProjectMaintenance.RemoveUnusedNets(Document));
-    public DrawingElement[] PreviewMove(PointMm delta) => AssociativeDimensions.ResolveAll(Document.Elements.Select(e =>
-    {
-        var followsOwner = e.LinkedElementId is { } owner && Selection.Contains(owner);
-        if (!Selection.Contains(e.Id) && !followsOwner) return e;
-        if (e.Kind != ElementKind.Dimension || (e.StartReference is null && e.EndReference is null)) return e.Move(delta);
-        var sourcesMoving = (e.StartReference is null || Selection.Contains(e.StartReference.ElementId)) &&
-            (e.EndReference is null || Selection.Contains(e.EndReference.ElementId));
-        if (sourcesMoving) return e with { A = e.StartReference is null ? e.A + delta : e.A, B = e.EndReference is null ? e.B + delta : e.B };
-        var v = e.LengthMm > 1e-9 ? (e.B - e.A) * (1 / e.LengthMm) : new PointMm(1, 0);
-        return e with { DimensionOffset = e.DimensionOffset - v.Y * delta.X + v.X * delta.Y };
-    }).ToArray());
+    public DrawingElement[] PreviewMove(PointMm delta) => SelectionProperties.Move(Document, Selection, delta);
     public void Move(PointMm delta) => Apply(PreviewMove(delta));
 
     public DrawingElement[] PreviewMoveVertex(Guid elementId, int vertexIndex, PointMm target)
@@ -428,7 +437,7 @@ public sealed class EditorSession
         foreach (var group in Document.Elements.GroupBy(e => e.GroupId ?? e.Id))
             if (crossing ? group.Any(e => box.Matches(e, true)) : group.All(e => box.Matches(e, false)))
                 Selection.UnionWith(group.Select(e => e.Id));
-        Changed?.Invoke();
+        RaiseChanged();
     }
     public void Group()
     {
@@ -470,7 +479,7 @@ public sealed class EditorSession
             ,LinkedElementId = e.LinkedElementId is { } owner && ids.TryGetValue(owner, out var newOwner) ? newOwner : null
         }).ToArray();
         Apply([.. Document.Elements, .. copies]);
-        Selection.Clear(); Selection.UnionWith(copies.Select(e => e.Id)); Changed?.Invoke();
+        Selection.Clear(); Selection.UnionWith(copies.Select(e => e.Id)); RaiseChanged();
     }
 
     public void RotateSelection90()
@@ -548,7 +557,7 @@ public sealed class EditorSession
         if (element is not null)
             foreach (var e in Document.Elements.Where(e => e.Id == element.Id ||
                 (element.GroupId is not null && e.GroupId == element.GroupId))) Selection.Add(e.Id);
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     public void Undo()
@@ -567,7 +576,7 @@ public sealed class EditorSession
     }
     private void Notify()
     {
-        Selection.IntersectWith(Document.Elements.Select(e => e.Id)); Changed?.Invoke();
+        Selection.IntersectWith(Document.Elements.Select(e => e.Id)); RaiseChanged();
     }
 
     private static DrawingDocument Normalize(DrawingDocument document)

@@ -235,6 +235,7 @@ Check("Reject duplicate IDs and degenerate rectangles", () =>
 });
 
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "tmp/checks");
+WorkspacePanels.SettingsDirectoryOverride = Path.Combine(output, "workspace-settings-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(output);
 Environment.SetEnvironmentVariable("ECAD_LOG_PATH", Path.Combine(output, $"ecad-{Guid.NewGuid():N}.log"));
 Environment.SetEnvironmentVariable("ECAD_WORKSPACE_ROOT", Path.Combine(output, "workspace"));
@@ -1275,8 +1276,10 @@ Check("Main window renders with Ukrainian controls", () =>
     Assert(main.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "ApplicationVersion").Text!.Contains($"ECAD {AppInfo.Version}"));
     Assert(AppInfo.Version == typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
         .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion.Split('+')[0]);
-    var labels = main.GetVisualDescendants().OfType<TextBlock>().Select(x => x.Text).ToHashSet();
-    Assert(labels.Contains("Файл") && labels.Contains("Аркуші") && labels.Contains("Редагування") && labels.Contains("Інструменти") && labels.Contains("Параметри побудови"));
+    var menu = main.GetVisualDescendants().OfType<Menu>().Single(m => m.Name == "WorkspaceMenu");
+    Assert(menu.Items.OfType<MenuItem>().Select(item => item.Header).Contains("Файл"));
+    Assert(main.GetVisualDescendants().OfType<StackPanel>().Any(item => item.Name == "DrawingToolbox"));
+    Assert(main.Panels.Placements.Count == 5 && main.Commands.All.Count() >= 40);
     Assert(main.GetVisualDescendants().OfType<Button>().Count(button => ToolTip.GetTip(button) is string) >= 15);
     main.MouseDown(new(500, 450), MouseButton.Left);
     main.MouseUp(new(500, 450), MouseButton.Left);
@@ -1289,7 +1292,7 @@ Check("Page settings show readable horizontal and vertical zone values", () =>
     var main = new MainWindow(); main.Show(); Dispatcher.UIThread.RunJobs();
     var edit = main.GetVisualDescendants().OfType<Button>()
         .Single(button => Equals(ToolTip.GetTip(button), "Параметри аркуша"));
-    edit.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)); Dispatcher.UIThread.RunJobs();
+    main.Commands["page.edit"].Execute(null); Dispatcher.UIThread.RunJobs();
     var dialog = main.OwnedWindows.Single(window => window.Title == "Параметри аркуша");
     var horizontal = dialog.GetVisualDescendants().OfType<NumericUpDown>().Single(control => control.Name == "HorizontalZones");
     var vertical = dialog.GetVisualDescendants().OfType<NumericUpDown>().Single(control => control.Name == "VerticalZones");
@@ -1300,4 +1303,5 @@ Check("Page settings show readable horizontal and vertical zone values", () =>
     typeof(MainWindow).GetField("allowClose", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(main, true);
     main.Close();
 });
+ECAD.Checks.WorkspaceChecks.Run(Check, output);
 Console.WriteLine($"{passed} checks passed. Rendered previews: {output}");

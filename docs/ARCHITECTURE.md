@@ -1,6 +1,6 @@
 # Архітектура ECAD
 
-Актуальність: 0.18, 2026-09-11. Розділи «Ціль» описують майбутній стан. Черговість і приймання — тільки [PLAN](../PLAN.md); факти й дефекти — [AUDIT](AUDIT.md).
+Актуальність: 0.19, 2026-09-16. Розділи «Ціль» описують майбутній стан. Черговість і приймання — тільки [PLAN](../PLAN.md); факти й дефекти — [AUDIT](AUDIT.md).
 
 ## Поточна структура
 
@@ -10,7 +10,7 @@ Core/Application містить правила NetNumbering, PathEditing, Librar
 
 Pages є канонічними. Root Elements/WidthMm/HeightMm — властивості доступу до активної сторінки, без другої копії даних після нормалізації. ProjectSnapshot schema 13 зберігає лише Pages і спільну модель. Вкладені records поки спільні з domain: це окремий верхній контракт, не повністю незалежний DTO-граф.
 
-DrawingCanvas поки поєднує renderer/input; MainWindow і PropertyPanel містять code-behind. Ці межі, command registry і read-only UI view models — робота 0.19. Контакти поки ElementId+PinIndex; PinId і повний graph — 0.20.
+WorkspaceCommands/ICommand об’єднують дії меню/toolbar/keyboard/palette. WorkspacePanels керує вкладками, перенесенням і persisted layout. CanvasRenderer отримує scene/document/selection/viewport; DrawingCanvas залишає input і preview. EditorSession розділяє ContentChanged, SelectionChanged та ActivePageChanged, зберігаючи Changed для старих адаптерів. SelectionProperties застосовує multi-selection атомарно. UI read models NavigationItem/LibraryEntry — records; інспектор і діалоги поки code-behind, повної MVVM/immutable-domain міграції немає. Контакти поки ElementId+PinIndex; PinId і повний graph — 0.20.
 
 ## Ціль: межі перед новими assemblies
 
@@ -51,7 +51,7 @@ DrawingCanvas поки поєднує renderer/input; MainWindow і PropertyPane
 
 ## Версії, збереження та історія
 
-Application 0.18 береться з Directory.Build.props: AppInfo читає assembly version, журнал — повну build version, пакувальник перевіряє відповідність. DocumentFormat.Current = 13; library schema = 1. Старі версії не є вимогою; наявні readers і fixtures залишено без розширення гарантій.
+Application 0.19 береться з Directory.Build.props: AppInfo читає assembly version, журнал — повну build version, пакувальник перевіряє відповідність. DocumentFormat.Current = 13; library schema = 1. Старі версії не є вимогою; наявні readers і fixtures залишено без розширення гарантій.
 
 FileJson перевіряє обов’язкові поля, повторні JSON-ключі й null-записи перед десеріалізацією. Schema 13 відхиляє root-копію геометрії. DocumentStructure перевіряє колекції й ID до нормалізації; помилки не замінюють відкритий документ. ProjectFile записує атомарно; ліміт project.json і бібліотеки — 32 MiB.
 

@@ -10,7 +10,7 @@ using ECAD.Core;
 
 namespace ECAD.Desktop;
 
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private readonly EditorSession session = new();
     private readonly DrawingCanvas canvas;
@@ -34,115 +34,7 @@ public sealed class MainWindow : Window
         savedRevision = session.ContentRevision;
         Title = "ECAD — прототип"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600;
         canvas = new DrawingCanvas(session);
-        var root = new DockPanel();
-        var header = new StackPanel { Background = Brushes.White };
-        DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        var title = new TextBlock { Name = "ApplicationVersion", Text = $"ECAD {AppInfo.Version}  /  Електрична модель проєкту", FontSize = 18, Margin = new Thickness(14, 8, 14, 3) };
-        header.Children.Add(title);
-        var commands = new WrapPanel { Margin = new Thickness(8, 0, 8, 2) };
-        header.Children.Add(commands);
-        var files = AddToolbarGroup(commands, "Файл");
-        AddAsyncIconButton(files, "+", "Новий аркуш", async () => { if (await CanDiscard()) { canvas.Cancel(); session.Load(new()); savedRevision = session.ContentRevision; currentPath = null; UpdateTitle(); } });
-        AddAsyncIconButton(files, "↗", "Відкрити…", Open);
-        AddAsyncIconButton(files, "↓", "Зберегти…", Save);
-        AddAsyncIconButton(files, "▤", "Бібліотеки пристроїв", ShowLibraryEditor);
-        var pages = AddToolbarGroup(commands, "Аркуші");
-        pagePicker.ItemTemplate = new FuncDataTemplate<DrawingPage>((page, _) => new TextBlock
-        {
-            Text = page is null ? "" : $"{page.Number}. {page.Name} · {FormatName(page.Format)}"
-        });
-        pagePicker.SelectionChanged += (_, _) =>
-        {
-            if (refreshingPages || pagePicker.SelectedItem is not DrawingPage page || page.Id == session.Document.ActivePageId) return;
-            canvas.Cancel(); session.SwitchPage(page.Id); canvas.Fit();
-            status.Text = $"Відкрито аркуш {page.Number}: {page.Name}.";
-        };
-        pages.Children.Add(pagePicker);
-        AddAsyncIconButton(pages, "+", "Додати аркуш", AddPage);
-        AddAsyncIconButton(pages, "✎", "Параметри аркуша", EditPage);
-        AddIconButton(pages, "⇄", "Зв’язати вибрані елементи на різних аркушах", CrossPageLink);
-        AddIconButton(pages, "×", "Видалити поточний аркуш (можна скасувати)", DeletePage);
-        RefreshPages();
-        var edit = AddToolbarGroup(commands, "Редагування");
-        AddIconButton(edit, "↶", "Скасувати (Ctrl+Z)", () => { canvas.Cancel(); session.Undo(); });
-        AddIconButton(edit, "↷", "Повторити (Ctrl+Y)", () => { canvas.Cancel(); session.Redo(); });
-        AddIconButton(edit, "⊞", "Групувати", () => { canvas.Cancel(); session.Group(); });
-        AddIconButton(edit, "⊟", "Розгрупувати", () => { canvas.Cancel(); session.Ungroup(); });
-        AddIconButton(edit, "⧉", "Копіювати (Ctrl+C)", canvas.CopySelection);
-        AddIconButton(edit, "▣", "Вставити (Ctrl+V)", canvas.PasteSelection);
-        AddIconButton(edit, "↻", "Повернути на 90° (Ctrl+R)", canvas.RotateSelection90);
-        AddIconButton(edit, "⌇", "Розбити лінію або сегмент полілінії", canvas.BeginSplitSegment);
-        AddIconButton(edit, "⌫", "Обрізати пряму лінію до межі", canvas.BeginTrim);
-        AddIconButton(edit, "⇥", "Продовжити пряму лінію до межі", canvas.BeginExtend);
-        AddIconButton(edit, "×", "Видалити (Delete)", () => { canvas.Cancel(); session.Delete(); });
-        var checks = AddToolbarGroup(commands, "Перевірка і вигляд");
-        AddAsyncIconButton(checks, "✓", "Перевірити схему", ShowElectricalIssues);
-        AddAsyncIconButton(checks, "⚡", "Електрична модель проєкту", ShowElectricalProject);
-        AddAsyncIconButton(checks, "!", "Журнал помилок", ShowErrorLog);
-        AddIconButton(checks, "□", "Вмістити аркуш у вікно", canvas.Fit);
-        var workspace = new WrapPanel { Margin = new Thickness(8, 0, 8, 5) };
-        header.Children.Add(workspace);
-        var tools = AddToolbarGroup(workspace, "Інструменти");
-        AddIconButton(tools, "↖", "Вибір / переміщення (Esc)", () => SetTool(null, "Потягни рамку з порожнього місця. Shift додає до вибору."));
-        AddIconButton(tools, "╱", "Лінія / провідник (L)", () =>
-        {
-            canvas.ActivatePathTool();
-            status.Text = canvas.ActivePathKind == ElementKind.Wire
-                ? "Провідник: кліки задають трасу; число → довжина → Tab → кут → Enter."
-                : "Графічна лінія: дві точки або початок → довжина → Tab → кут → Enter.";
-        });
-        AddIconButton(tools, "▭", "Прямокутник (R)", () => SetTool(ElementKind.Rectangle, "Прямокутник: два кути або початок → ширина → Tab → висота → Enter."));
-        AddIconButton(tools, "○", "Коло (C)", () => SetTool(ElementKind.Circle, "Коло: центр і точка або центр → радіус; Tab перемикає на діаметр."));
-        AddIconButton(tools, "⌁", "Полілінія (P)", () => SetTool(ElementKind.Polyline, "Полілінія: послідовні вершини або точні сегменти; Enter завершує."));
-        AddIconButton(tools, "⌒", "Дуга (A)", () => SetTool(ElementKind.Arc, "Дуга: три точки або центр → радіус → Tab → кут → Enter."));
-        AddIconButton(tools, "↔", "Розмір (D)", () => SetTool(ElementKind.Dimension, "Розмір: обери дві точки / паралельні лінії, потім клацни місце напису."));
-        AddIconButton(tools, "●", "Точка з’єднання", () => SetTool(ElementKind.Junction, "Вузол: клацни кінець, сегмент або перетин ліній. Звичайний перетин без точки не є з’єднанням."));
-        AddIconButton(tools, "T", "Текст", () => SetTool(ElementKind.Text, "Текст: клацни місце розташування. Подвійний клік редагує наявний напис."));
-        symbolPicker.ItemTemplate = new FuncDataTemplate<SymbolDefinition>((item, _) => new TextBlock { Text = item?.Name ?? "" });
-        symbolPicker.SelectionChanged += (_, _) => { if (symbolPicker.SelectedItem is SymbolDefinition item) canvas.ActiveSymbolKey = item.Key; };
-        tools.Children.Add(symbolPicker); RefreshSymbolPicker();
-        AddIconButton(tools, "◇", "Вставити вибраний символ", () => SetTool(ElementKind.Symbol, "Символ: обери тип у списку та клацай місця розташування; Ctrl+R повертає виділений символ."));
-        AddAsyncIconButton(tools, "◇+", "Створити символ…", CreateCustomSymbol, 46);
-        var settings = AddToolbarGroup(workspace, "Параметри побудови");
-        var grid = new CheckBox { Content = "Сітка", IsChecked = true, Margin = new Thickness(0, 0, 8, 0) };
-        grid.IsCheckedChanged += (_, _) => { canvas.GridVisible = grid.IsChecked == true; canvas.InvalidateVisual(); };
-        settings.Children.Add(grid);
-        var snap = new CheckBox { Content = "Прив’язка", IsChecked = true, Margin = new Thickness(0, 0, 8, 0) };
-        snap.IsCheckedChanged += (_, _) => canvas.SnapEnabled = snap.IsChecked == true;
-        settings.Children.Add(snap);
-        settings.Children.Add(new TextBlock { Text = "Крок, мм", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
-        var step = new NumericUpDown { Minimum = .1m, Maximum = 100, Increment = .5m, Value = 2.5m, Width = 105 };
-        step.ValueChanged += (_, _) => { canvas.GridStep = (double)(step.Value ?? 2.5m); canvas.InvalidateVisual(); };
-        settings.Children.Add(step);
-        var pathTypeButton = new Button { Content = "Тип: провідник", Margin = new Thickness(5, 2, 2, 2), Padding = new Thickness(8, 5) };
-        pathTypeButton.Click += (_, _) =>
-        {
-            var kind = canvas.ActivePathKind == ElementKind.Wire ? ElementKind.Line : ElementKind.Wire;
-            canvas.SetPathKind(kind);
-            pathTypeButton.Content = kind == ElementKind.Wire ? "Тип: провідник" : "Тип: графіка";
-        };
-        settings.Children.Add(pathTypeButton);
-        var angleSteps = new[] { 0d, 15d, 30d, 45d };
-        var angleIndex = 0;
-        var angleButton = new Button { Content = "Кут: вільно", Margin = new Thickness(5, 2, 2, 2), Padding = new Thickness(8, 5) };
-        angleButton.Click += (_, _) =>
-        {
-            angleIndex = (angleIndex + 1) % angleSteps.Length;
-            var angleStep = angleSteps[angleIndex];
-            canvas.SetAngleSnap(angleStep);
-            angleButton.Content = angleStep == 0 ? "Кут: вільно" : $"Кут: {angleStep:0}°";
-            canvas.Focus();
-        };
-        settings.Children.Add(angleButton);
-        AddIconButton(settings, "✎", "Змінити параметри виділеної фігури", canvas.EditSelectedGeometry);
-        var footer = new StackPanel { Background = Brushes.White };
-        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
-        footer.Children.Add(status);
-        footer.Children.Add(pageInfo);
-        UpdatePageInfo();
-        var properties = new PropertyPanel(session, message => status.Text = message);
-        DockPanel.SetDock(properties, Dock.Right); root.Children.Add(properties);
-        root.Children.Add(canvas); Content = root;
+        BuildWorkspace();
         canvas.Status += message => status.Text = message;
         canvas.TextPlacementRequested += async request =>
         {
@@ -173,6 +65,7 @@ public sealed class MainWindow : Window
     {
         UpdateTitle();
         UpdatePageInfo();
+        RefreshWorkspace();
         if (!pageRefreshPending)
         {
             pageRefreshPending = true;
@@ -214,76 +107,17 @@ public sealed class MainWindow : Window
         symbolPicker.SelectedItem = definitions.FirstOrDefault(d => d.Key == selectedKey) ?? definitions[0];
     }
     private void UpdateTitle() => Title = $"{(IsDirty ? "* " : "")}{Path.GetFileName(currentPath) ?? "Новий аркуш"} — ECAD прототип";
-    private static WrapPanel AddToolbarGroup(Panel parent, string title)
-    {
-        var controls = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
-        var card = new Border
-        {
-            Margin = new Thickness(3), Padding = new Thickness(6, 3), CornerRadius = new CornerRadius(6),
-            Background = new SolidColorBrush(Color.Parse("#f8fafc")),
-            BorderBrush = new SolidColorBrush(Color.Parse("#d8e0e8")), BorderThickness = new Thickness(1),
-            Child = new StackPanel
-            {
-                Spacing = 2,
-                Children =
-                {
-                    new TextBlock { Text = title, FontSize = 11, Foreground = Brushes.SlateGray, Margin = new Thickness(3, 0) },
-                    controls
-                }
-            }
-        };
-        parent.Children.Add(card);
-        return controls;
-    }
-
-    private static void AddIconButton(Panel panel, string icon, string tip, Action action, double width = 38)
-    {
-        var button = new Button
-        {
-            Content = icon, Width = width, Height = 34, FontSize = icon.Length > 1 ? 15 : 19,
-            Margin = new Thickness(2), Padding = new Thickness(5), HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-        ToolTip.SetTip(button, tip);
-        button.Click += (_, _) => action();
-        panel.Children.Add(button);
-    }
-
-    private void AddAsyncIconButton(Panel panel, string icon, string tip, Func<Task> action, double width = 38)
-    {
-        var button = new Button
-        {
-            Content = icon, Width = width, Height = 34, FontSize = icon.Length > 1 ? 15 : 19,
-            Margin = new Thickness(2), Padding = new Thickness(5), HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-        ToolTip.SetTip(button, tip);
-        button.Click += async (_, _) =>
-        {
-            try { await action(); }
-            catch (Exception ex) { ReportError(ex, tip); }
-        };
-        panel.Children.Add(button);
-    }
-
     private static void AddButton(Panel panel, string text, Action action)
     {
         var button = new Button { Content = text, Margin = new Thickness(3), Padding = new Thickness(10, 6) };
         button.Click += (_, _) => action(); panel.Children.Add(button);
     }
-    private void AddAsyncButton(Panel panel, string text, Func<Task> action)
-    {
-        var button = new Button { Content = text, Margin = new Thickness(3), Padding = new Thickness(10, 6) };
-        button.Click += async (_, _) =>
-        {
-            try { await action(); }
-            catch (Exception ex) { ReportError(ex, text); }
-        };
-        panel.Children.Add(button);
-    }
-
     public void ReportError(Exception exception, string context, bool writeToLog = true)
     {
-        if (writeToLog) AppLog.Write(context, exception);
-        status.Text = $"{context}: {exception.Message} Деталі записано в журнал.";
+        var reference = writeToLog ? Guid.NewGuid().ToString("N")[..8] : "";
+        if (writeToLog) AppLog.Write($"{context} [{reference}]", exception);
+        status.Text = $"{context}: {exception.Message} Деталі записано в журнал. {reference}";
+        ShowNotice(status.Text);
     }
     private static FilePickerFileType FileType => new("ECAD") { Patterns = ["*.ecad"] };
 
@@ -502,19 +336,14 @@ public sealed class MainWindow : Window
 
     private async Task ShowElectricalIssues()
     {
-        canvas.Cancel(); var issues = ElectricalRuleChecker.Check(session.Document);
-        if (issues.Length == 0) { status.Text = "Перевірка завершена: обривів і дублів не знайдено."; return; }
-        var dialog = new Window
-        {
-            Title = $"Перевірка схеми — проблем: {issues.Length}", Width = 620, Height = 430,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner
-        };
-        var root = new DockPanel { Margin = new Thickness(16) };
-        var close = new Button { Content = "Закрити", Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
-        close.Click += (_, _) => dialog.Close(); DockPanel.SetDock(close, Dock.Bottom); root.Children.Add(close);
-        root.Children.Add(new ListBox { ItemsSource = issues.Select(i => i.Message).ToArray() });
-        dialog.Content = root; await dialog.ShowDialog(this);
-        status.Text = $"Перевірка схеми: знайдено проблем — {issues.Length}.";
+        canvas.Cancel(); ercSummary.Text = "Перевірка…"; Panels.Show("erc");
+        var revision = session.ContentRevision;
+        var document = session.Document;
+        var issues = await RunBackground(_ => ElectricalRuleChecker.Check(document));
+        if (revision != session.ContentRevision) { ercSummary.Text = "Документ змінено під час перевірки. Запусти F7 повторно."; return; }
+        ercIssues.ItemsSource = issues;
+        ercSummary.Text = issues.Length == 0 ? "Перевірка завершена: повідомлень немає." : $"Повідомлень: {issues.Length}. Обери рядок для переходу до об’єкта.";
+        status.Text = ercSummary.Text;
     }
 
     private async Task ShowElectricalProject()
@@ -550,8 +379,10 @@ public sealed class MainWindow : Window
             });
             if (file is null) return;
             var path = file.TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
-            ProjectFile.Save(path, session.Document);
-            currentPath = path; savedRevision = session.ContentRevision; UpdateTitle(); status.Text = "Документ збережено.";
+            var document = session.Document; var revision = session.ContentRevision;
+            status.Text = "Збереження документа…";
+            await RunBackground(token => { ProjectFile.Save(path, document, token); return true; }, discardResultOnCancel: false);
+            currentPath = path; savedRevision = revision; UpdateTitle(); status.Text = IsDirty ? "Файл збережено; нові зміни ще не записані." : "Документ збережено.";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         { ReportError(ex, "Не вдалося зберегти"); }
@@ -570,7 +401,10 @@ public sealed class MainWindow : Window
             });
             if (files.Count == 0) return;
             var path = files[0].TryGetLocalPath() ?? throw new IOException("Потрібен локальний файл.");
-            var document = ProjectFile.Open(path);
+            var revision = session.ContentRevision;
+            status.Text = "Завантаження документа…";
+            var document = await RunBackground(token => ProjectFile.Open(path, token));
+            if (revision != session.ContentRevision && !await CanDiscard()) return;
             session.Load(document); currentPath = path; savedRevision = session.ContentRevision;
             canvas.Fit(); UpdateTitle(); status.Text = "Документ відкрито.";
         }

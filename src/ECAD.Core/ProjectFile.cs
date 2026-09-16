@@ -6,8 +6,9 @@ namespace ECAD.Core;
 public static class ProjectFile
 {
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
-    public static void Save(string path, DrawingDocument document)
+    public static void Save(string path, DrawingDocument document, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         DocumentStructure.Validate(document);
         if (document.SchemaVersion is < 1 or > DocumentFormat.Current) throw new InvalidDataException("Непідтримувана версія документа.");
         document = ElectricalProjectModel.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
@@ -25,13 +26,15 @@ public static class ProjectFile
                     stream.Write(content);
                 file.Flush(flushToDisk: true);
             }
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(temp, path, overwrite: true);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 
-    public static DrawingDocument Open(string path)
+    public static DrawingDocument Open(string path, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var zip = ZipFile.OpenRead(path);
         if (zip.Entries.Count(e => e.FullName == "project.json") != 1)
             throw new InvalidDataException("Відсутній або неоднозначний project.json.");
@@ -44,6 +47,7 @@ public static class ProjectFile
         if (document.SchemaVersion <= 5) document = SymbolLabels.Ensure(document);
         document = ElectricalProjectModel.Normalize(document with { Elements = DrivingDimensions.ApplyAll(document.Elements) });
         document.Validate();
+        cancellationToken.ThrowIfCancellationRequested();
         return document;
     }
 }
